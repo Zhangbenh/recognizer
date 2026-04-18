@@ -1,0 +1,1520 @@
+````markdown
+# 架构设计文档（V2.1，最终收口版）
+## 便携式离线植物识别器（含区域采样系统）
+
+---
+
+## 1. 文档目标
+
+本文档在 V2 的基础上进行最终收口，目标是形成一份：
+
+- **与用户故事及验收标准一致**
+- **与系统说明文档一致**
+- **可直接指导实现**
+- **可支撑验收与测试**
+- **可作为归档版本长期使用**
+
+的最终架构设计文档。
+
+本版重点完成以下收口：
+
+1. 明确启动默认进入 `HOME`，2 秒进入取景界面仅适用于普通模式确认后
+2. 明确采样模式下 `DISPLAY` 不允许用户取消记录
+3. 持久化“最后一次置信度”
+4. 冻结 `STATS` 入口，仅允许从 `REGION_SELECT` 进入
+5. 完善 `ERROR` 行为与恢复策略表
+6. 将长时稳定性要求转化为架构约束
+7. 补强准确率要求的架构支撑
+
+---
+
+## 2. 架构目标与设计原则
+
+### 2.1 架构目标
+
+系统需要在 Raspberry Pi 4B 2GB 上稳定运行，并满足以下目标：
+
+1. 支持离线植物识别
+2. 支持普通模式与采样模式
+3. 支持地图/区域选择与区域内连续识别
+4. 支持本地 JSON 持久化与重启后恢复
+5. 支持统计查看
+6. 满足单线程、低复杂度、可维护的实现要求
+7. 支持对关键验收指标进行验证，包括响应时间、推理时延、稳定性、长时运行与错误处理
+8. 支持模型发布门禁与部署一致性校验，以支撑准确率目标
+
+---
+
+### 2.2 设计原则
+
+#### 2.2.1 状态机唯一控制流
+
+所有系统流程必须由状态机驱动。  
+任何模块不得绕过状态机直接修改业务流程、页面跳转或持久化行为。  
+该原则用于保证：
+
+- 状态互斥
+- 可预测的流程控制
+- 错误可回退
+- UI 与状态一致
+
+#### 2.2.2 单线程主控
+
+主业务逻辑采用单线程同步执行。  
+不引入多进程、消息总线、异步任务系统。  
+原因：
+
+- 系统规模小
+- 交互流程线性
+- 设备资源有限
+- 单线程更易验证和排错
+
+#### 2.2.3 适配器隔离
+
+所有外部依赖通过适配层抽象，至少包括：
+
+- 相机
+- 输入
+- 推理
+- 存储
+- 配置加载
+
+这样做的目的不是“为了优雅”，而是为了控制硬件/框架耦合，避免后续替换 Picamera2、GPIO 或 TFLite 时波及业务层。
+
+#### 2.2.4 UI 完全由状态驱动
+
+UI 不保存独立业务状态。  
+UI 只根据当前状态和状态上下文进行渲染。  
+不允许出现“状态已切换，但页面仍显示旧内容”的情况。
+
+#### 2.2.5 受控数据增长
+
+系统采用本地 JSON 持久化，但必须显式控制增长边界：
+
+- 单 Region 最大植物种类数 ≤ 50
+- 单植物 count ≤ 999
+- 单 JSON 文件最大大小 ≤ 1MB
+
+达到上限时必须停止相应写入并提示，而不是静默失败。
+
+#### 2.2.6 Fail Fast + 安全回退
+
+所有关键失败必须：
+
+1. 立即停止当前非法流程
+2. 显式提示用户
+3. 返回安全状态
+
+不允许失败后进入不确定状态。
+
+#### 2.2.7 验收可证明性
+
+所有关键验收项都必须在架构层找到对应保障机制。  
+不能仅依赖“实现时注意”，必须通过：
+
+- 明确预算
+- 明确状态规则
+- 明确日志点
+- 明确校验逻辑
+
+来支撑验收。
+
+---
+
+## 3. 需求与约束基线
+
+本架构直接以以下内容为基线。
+
+### 3.1 功能基线
+
+系统必须支持：
+
+- 普通模式：取景 → 拍照 → 推理 → 显示 → 返回
+- 采样模式：首页 → 地图 → 区域 → 识别 → 自动记录 → 循环
+- 区域内自动记录
+- 本地统计查看
+- 本地 JSON 持久化
+
+### 3.2 状态与流程约束
+
+系统说明文档要求：
+
+- 同时仅允许一个状态活跃
+- `Inferencing / Recording` 不允许中断
+- `Display > 5 秒` 自动返回
+- `Inferencing > 3 秒` 失败提示
+- `Recording > 1 秒` 失败提示
+- UI 由状态驱动
+- 无并发写入
+
+### 3.3 数据基线
+
+当前数据集为 30 类植物，训练集 21000 张、验证集 3000 张，类别均衡，每类训练集 700 张、验证集 100 张。  
+该事实约束了：
+
+- 标签映射维度
+- 模型输出维度
+- 部署一致性校验
+- 分类显示范围
+
+---
+
+## 4. 系统上下文与边界
+
+### 4.1 运行环境
+
+- Raspberry Pi 4B（2GB）
+- Camera Module 3
+- 3.5 inch HDMI LCD
+- GPIO 两键输入
+- 本地模型文件
+- 本地 JSON 数据文件
+
+### 4.2 系统边界内
+
+本系统负责：
+
+- 模式选择
+- 地图/区域选择
+- 图像采集
+- 离线推理
+- 标签映射
+- 结果展示
+- 区域统计记录
+- 数据持久化
+- 统计展示
+- 错误提示与安全回退
+
+### 4.3 系统边界外
+
+本系统不负责：
+
+- 云端服务
+- 联网同步
+- 远程配置
+- 动态增删地图/区域
+- 数据编辑/删除
+- 模型在线更新
+
+---
+
+## 5. 总体架构
+
+### 5.1 分层结构
+
+```text
+Presentation Layer
+↓
+Application Layer
+↓
+Domain Layer
+↓
+Infrastructure Layer
+````
+
+### 5.2 各层职责
+
+#### Presentation Layer
+
+负责：
+
+* 页面渲染
+* 错误提示
+* 状态可视化
+
+不负责：
+
+* 流程跳转决策
+* 业务判断
+* 数据写入
+
+#### Application Layer
+
+负责：
+
+* 状态机
+* 事件分发
+* 用例编排
+* 状态上下文维护
+* 错误回退
+
+#### Domain Layer
+
+负责：
+
+* 识别结果语义
+* 置信度判定
+* 去重与计数规则
+* 记录事件与统计模型
+* 容量限制规则
+* 发布门禁规则
+
+#### Infrastructure Layer
+
+负责：
+
+* GPIO 输入
+* 相机采集
+* TFLite 推理
+* JSON 读写
+* 配置文件加载
+* 标签文件加载
+
+---
+
+## 6. 核心模块设计
+
+### 6.1 AppController
+
+#### 职责
+
+* 系统启动入口
+* 初始化依赖
+* 装配模块
+* 启动主循环
+* 管理全局生命周期
+
+#### 说明
+
+AppController 不做业务判断，只负责：
+
+* 初始化顺序控制
+* 失败时进入启动错误页
+* 启动后将控制权交给 StateMachine
+
+---
+
+### 6.2 StateMachine
+
+#### 职责
+
+* 保存当前状态
+* 处理事件
+* 执行状态迁移
+* 调用对应 Use Case
+* 保证状态互斥
+* 记录状态转移日志
+
+#### 约束
+
+* 同一时刻只允许一个状态活跃
+* 所有页面切换必须由状态切换触发
+* 非法事件必须被显式忽略或转换为错误提示
+
+---
+
+### 6.3 StateContext
+
+#### 职责
+
+保存状态机运行时上下文，不属于 UI，不直接持久化。
+
+#### 包含内容
+
+```text
+mode                      # normal / sampling
+selected_map_id
+selected_region_id
+last_captured_frame
+last_recognition_result
+last_error
+display_deadline
+current_stats_snapshot
+```
+
+#### 说明
+
+StateContext 是状态机的运行上下文，不是领域存储对象。
+它只用于支撑流程推进。
+
+---
+
+### 6.4 InputAdapter
+
+#### 输入事件统一模型
+
+```text
+CONFIRM_PRESS
+NAV_PRESS
+BACK_LONG_PRESS
+TIMEOUT
+SYSTEM_ERROR
+BOOT_OK
+BOOT_FAIL
+CAPTURE_OK
+CAPTURE_FAIL
+INFER_OK
+INFER_FAIL
+RECORD_OK
+RECORD_FAIL
+RETRY_PRESS
+```
+
+#### 实现
+
+* GPIOButtonAdapter
+* KeyboardAdapter（开发调试用）
+
+#### 说明
+
+用户物理输入只产生原始按键事件，状态机消费的是**归一化事件**。
+
+---
+
+### 6.5 CameraAdapter
+
+#### 接口
+
+```text
+start_preview()
+capture_frame()
+stop_preview()
+health_check()
+```
+
+#### 实现
+
+* Picamera2CameraAdapter
+
+#### 职责
+
+* 启动预览
+* 抓取识别帧
+* 健康检查
+* 提供统一图像对象给推理模块
+
+#### 关键要求
+
+* 预览流与抓帧流程必须共享同一相机控制链路，避免重复初始化造成延迟
+* 拍照后的识别输入必须来源于“当前画面附近帧”，以支持冻结误差 ≤1 帧的验收目标
+* 相机初始化失败时，系统不得进入 `PREVIEW`
+
+---
+
+### 6.6 InferenceAdapter
+
+#### 接口
+
+```text
+load_model()
+infer(frame)
+health_check()
+get_output_shape()
+get_model_metadata()
+```
+
+#### 实现
+
+* TFLiteInferenceAdapter
+
+#### 职责
+
+* 模型加载
+* 输入预处理
+* 推理执行
+* 输出原始 logits/probabilities
+* 暴露输出维度与模型元信息，用于启动期一致性校验
+
+---
+
+### 6.7 RecognitionService
+
+#### 职责
+
+* 原始输出解析
+* Top-1 结果提取
+* 置信度转换
+* 阈值判断
+* 生成统一 `RecognitionResult`
+
+#### 判定规则
+
+* 当 `confidence < 60%` 时，输出“未识别”
+* 当 `confidence ≥ 60%` 时，输出类别结果
+
+#### 说明
+
+该规则来自拒识机制，必须放入领域层，而不是散落在 UI 或存储逻辑中。
+
+---
+
+### 6.8 LabelRepository
+
+#### 职责
+
+* 加载标签映射
+* 校验标签总数与模型输出维度一致
+* 提供 `class_index -> plant_key/display_name` 映射
+
+#### 约束
+
+由于当前数据集为 30 类植物，标签映射必须保证：
+
+* 类别数量 = 30
+* 索引连续
+* 与模型输出维度一致
+
+#### 启动失败条件
+
+若标签文件损坏、缺失、数量不匹配，则视为启动失败，进入启动错误页。
+
+---
+
+### 6.9 SamplingConfigRepository
+
+#### 职责
+
+加载地图和区域静态配置。
+
+#### 配置内容
+
+```text
+maps:
+  - map_id
+    display_name
+    regions:
+      - region_id
+        display_name
+```
+
+#### 约束
+
+* Map 数量 ≥ 3
+* 每个 Map 的 Region 数量 ≥ 4
+* 配置为静态只读
+* 不支持运行时新增、删除、编辑
+
+#### 启动失败与运行降级
+
+* 若配置文件存在但非法：启动失败
+* 若配置文件合法但 maps 为空：系统仍可启动，但采样模式入口显示“无可用地图”
+
+---
+
+### 6.10 StorageAdapter
+
+#### 职责
+
+* JSON 读取
+* JSON 保存
+* 原子写入
+* 文件大小检查
+* 数据格式校验
+
+#### 接口
+
+```text
+load_region_stats(region_id)
+save_region_stats(region_id, data)
+```
+
+#### 说明
+
+StorageAdapter 只做基础 IO 与一致性保障，不负责业务规则。
+
+---
+
+### 6.11 SamplingRecorder
+
+#### 职责
+
+* 根据识别结果更新区域统计
+* 执行去重与计数
+* 写入最后一次置信度
+* 处理容量上限
+* 生成新的 `RegionStatsSnapshot`
+* 调用 StorageAdapter 持久化
+
+#### 关键业务规则
+
+* 唯一键：`plant_name + region_id`
+* 同一植物重复识别不新增条目，`count +1`
+* 即使短时间重复识别也计数
+* 单次识别最多更新一次记录
+* 仅当识别成功且 `confidence ≥ 60%` 时记录
+* 每次成功记录时，更新该植物在该区域的 `last_confidence`
+* 采样模式下，`DISPLAY` 结束后若结果可记录，则必须进入 `RECORDING`，不得被用户取消
+
+#### 说明
+
+这里显式采用系统说明文档中的唯一键语义。
+如果内部实现使用 `plant_key`，也必须保证其与 `plant_name` 的持久化语义一致。
+
+---
+
+### 6.12 StatisticsQueryService
+
+#### 职责
+
+* 查询某 Region 的统计结果
+* 输出统计页需要的数据视图
+
+#### 输出内容
+
+* 植物种类总数
+* 每种植物的数量
+* 每种植物最后一次置信度
+* 最近更新时间（可选扩展）
+
+#### 说明
+
+将“统计展示”从存储层中分离出来，避免 UI 直接解析原始 JSON。
+
+---
+
+### 6.13 ReleaseGateService
+
+#### 职责
+
+* 校验模型、标签、阈值配置的一致性
+* 校验模型发布元信息
+* 作为部署前与启动期门禁的一部分
+
+#### 校验内容
+
+* 模型输出维度是否为 30
+* 标签数量是否为 30
+* 标签索引是否连续
+* 阈值配置是否有效
+* 模型版本标识是否存在
+* 模型评估结果是否达到发布门槛
+
+#### 说明
+
+该服务不参与运行期推理，但负责将“准确率要求”转化为发布门禁约束。
+即：
+
+* **架构不保证模型天然达到 85%**
+* **架构保证只有达到门槛的模型才允许进入发布与部署流程**
+
+---
+
+### 6.14 UIRenderer
+
+#### 页面
+
+* Booting
+* Home
+* MapSelect
+* RegionSelect
+* Preview
+* InferencingOverlay
+* Display
+* Stats
+* Error
+
+#### 原则
+
+* UI 由状态 + StateContext 驱动
+* UI 不持有独立业务状态
+* UI 不直接访问 StorageAdapter / InferenceAdapter
+
+---
+
+## 7. 配置与数据架构
+
+### 7.1 静态配置文件
+
+#### 7.1.1 system_config.json
+
+保存：
+
+* 拒识阈值
+* 自动返回时间
+* 性能阈值
+* 日志级别
+* 长按阈值
+* 模型发布门槛配置
+
+#### 7.1.2 labels.json
+
+保存：
+
+* 类别索引
+* plant_key
+* plant_name
+* display_name
+
+#### 7.1.3 sampling_config.json
+
+保存：
+
+* map 列表
+* region 列表
+
+#### 7.1.4 model_manifest.json
+
+保存：
+
+* model_version
+* output_classes
+* training_dataset_name
+* evaluated_top1_accuracy
+* quantization_type
+* input_shape
+
+#### 说明
+
+`model_manifest.json` 是模型发布门禁的输入之一。
+若缺失或关键字段非法，则不应进入正式部署。
+
+---
+
+### 7.2 持久化数据文件
+
+#### 存储目录
+
+```text
+data/
+  regions/
+    region_<region_id>.json
+```
+
+#### 每个 Region 一个文件
+
+原因：
+
+* 与“数据按 Region 独立存储”一致
+* 简化加载和写入边界
+* 降低单文件损坏影响范围
+
+---
+
+### 7.3 领域模型
+
+#### 7.3.1 RecognitionResult
+
+```text
+plant_name
+display_name
+confidence
+is_recognized
+```
+
+#### 7.3.2 RecordEvent
+
+```text
+region_id
+plant_name
+display_name
+confidence
+timestamp
+```
+
+#### 说明
+
+为保留“单次识别生成一次记录事件”的语义，领域层显式定义 `RecordEvent`。
+但当前版本不要求将每个 `RecordEvent` 完整落盘为流水日志；
+它用于：
+
+* 约束一次识别只触发一次记录行为
+* 作为 `SamplingRecorder` 的输入
+* 保留与系统说明一致的语义层次
+
+---
+
+### 7.4 持久化模型
+
+#### RegionStatsFile
+
+```json
+{
+  "region_id": "r1",
+  "plant_count": 3,
+  "items": [
+    {
+      "plant_name": "banana",
+      "display_name": "Banana",
+      "count": 5,
+      "last_confidence": 0.91,
+      "last_seen_at": "2026-04-17T14:20:31"
+    }
+  ],
+  "updated_at": "2026-04-17T14:20:31"
+}
+```
+
+#### 说明
+
+这里明确：
+
+* 持久化的是**区域统计结果**
+* 不是完整识别流水日志
+* `last_seen_at` 表示该植物最近一次被识别成功的时间
+* `last_confidence` 表示该植物最近一次被识别成功时的置信度
+* `updated_at` 表示该 Region 文件最近一次被更新的时间
+
+这样既满足统计需求，也满足“写入记录包含置信度与时间戳”的验收要求。
+
+---
+
+### 7.5 容量与增长控制
+
+#### 约束
+
+* 单 Region 最大植物种类数：50
+* 单植物最大 count：999
+* 单 JSON 文件最大大小：1MB
+
+#### 行为规则
+
+| 场景           | 行为      |
+| ------------ | ------- |
+| 新植物超过 50 种   | 拒绝新增并提示 |
+| count 已达 999 | 不再增长    |
+| 文件即将超过 1MB   | 停止写入并提示 |
+
+#### 说明
+
+这是领域层规则，由 `SamplingRecorder` 判定，由 `StorageAdapter` 协助执行。
+
+---
+
+## 8. 状态机设计
+
+### 8.1 状态列表
+
+正式状态统一定义为：
+
+* `BOOTING`
+* `HOME`
+* `MAP_SELECT`
+* `REGION_SELECT`
+* `PREVIEW`
+* `CAPTURED`
+* `INFERENCING`
+* `DISPLAY`
+* `RECORDING`
+* `STATS`
+* `ERROR`
+
+#### 说明
+
+相比 V1：
+
+* 补足了启动态与错误态
+* 统一使用名词/形容词式状态名
+* 消除 `Capture/Captured`、`Record/Recording` 混用问题
+
+---
+
+### 8.2 状态进入动作
+
+| 状态            | 进入动作                          |
+| ------------- | ----------------------------- |
+| BOOTING       | 初始化配置、标签、采样配置、输入、相机、模型、发布门禁校验 |
+| HOME          | 渲染模式选择，默认高亮普通模式               |
+| MAP_SELECT    | 加载 map 列表并高亮第一项               |
+| REGION_SELECT | 加载所选 map 的 region 列表并高亮第一项    |
+| PREVIEW       | 启动或保持相机预览                     |
+| CAPTURED      | 固化当前识别帧到 StateContext         |
+| INFERENCING   | 调用推理服务并启动超时计时                 |
+| DISPLAY       | 显示识别结果并启动 5 秒自动返回计时           |
+| RECORDING     | 在采样模式下写入统计并启动 1 秒超时计时         |
+| STATS         | 加载并显示当前 Region 统计结果           |
+| ERROR         | 显示错误信息并等待可恢复输入                |
+
+---
+
+### 8.3 状态退出动作
+
+| 状态          | 退出动作                   |
+| ----------- | ---------------------- |
+| PREVIEW     | 无，保持相机链路               |
+| CAPTURED    | 无                      |
+| INFERENCING | 清理本次推理临时对象             |
+| DISPLAY     | 清理展示定时器                |
+| RECORDING   | 刷新 StateContext 中的统计快照 |
+| ERROR       | 清理当前错误信息               |
+
+---
+
+### 8.4 状态转移表
+
+#### 8.4.1 启动流程
+
+| 当前状态    | 事件        | 条件 | 下一个状态 |
+| ------- | --------- | -- | ----- |
+| BOOTING | BOOT_OK   | 默认 | HOME  |
+| BOOTING | BOOT_FAIL | 默认 | ERROR |
+
+#### 8.4.2 普通模式
+
+| 当前状态        | 事件              | 条件     | 下一个状态       |
+| ----------- | --------------- | ------ | ----------- |
+| HOME        | CONFIRM_PRESS   | 选中普通模式 | PREVIEW     |
+| PREVIEW     | CONFIRM_PRESS   | 默认     | CAPTURED    |
+| CAPTURED    | CAPTURE_OK      | 默认     | INFERENCING |
+| CAPTURED    | CAPTURE_FAIL    | 默认     | ERROR       |
+| INFERENCING | INFER_OK        | 默认     | DISPLAY     |
+| INFERENCING | INFER_FAIL      | 默认     | ERROR       |
+| DISPLAY     | TIMEOUT         | 普通模式   | PREVIEW     |
+| DISPLAY     | BACK_LONG_PRESS | 普通模式   | PREVIEW     |
+
+#### 8.4.3 采样模式
+
+| 当前状态          | 事件              | 条件          | 下一个状态         |
+| ------------- | --------------- | ----------- | ------------- |
+| HOME          | CONFIRM_PRESS   | 选中采样模式      | MAP_SELECT    |
+| MAP_SELECT    | NAV_PRESS       | 默认          | MAP_SELECT    |
+| MAP_SELECT    | CONFIRM_PRESS   | 有 map       | REGION_SELECT |
+| MAP_SELECT    | CONFIRM_PRESS   | 无 map       | ERROR 或停留并提示  |
+| MAP_SELECT    | BACK_LONG_PRESS | 默认          | HOME          |
+| REGION_SELECT | NAV_PRESS       | 默认          | REGION_SELECT |
+| REGION_SELECT | CONFIRM_PRESS   | 默认          | PREVIEW       |
+| REGION_SELECT | BACK_LONG_PRESS | 默认          | MAP_SELECT    |
+| REGION_SELECT | NAV_PRESS_LONG  | 进入统计页       | STATS         |
+| STATS         | BACK_LONG_PRESS | 默认          | REGION_SELECT |
+| PREVIEW       | CONFIRM_PRESS   | sampling 模式 | CAPTURED      |
+| CAPTURED      | CAPTURE_OK      | 默认          | INFERENCING   |
+| CAPTURED      | CAPTURE_FAIL    | 默认          | ERROR         |
+| INFERENCING   | INFER_OK        | 默认          | DISPLAY       |
+| INFERENCING   | INFER_FAIL      | 默认          | ERROR         |
+| DISPLAY       | TIMEOUT         | 识别成功且可记录    | RECORDING     |
+| DISPLAY       | TIMEOUT         | 未识别         | PREVIEW       |
+| RECORDING     | RECORD_OK       | 默认          | PREVIEW       |
+| RECORDING     | RECORD_FAIL     | 默认          | ERROR         |
+
+#### 说明
+
+采样模式下，`DISPLAY` 不允许用户通过返回操作跳过记录。
+若结果满足记录条件，则 `DISPLAY` 结束后必须进入 `RECORDING`。
+
+---
+
+### 8.5 非法事件处理规则
+
+| 状态          | 非法事件处理                   |
+| ----------- | ------------------------ |
+| INFERENCING | 所有用户输入忽略                 |
+| RECORDING   | 所有用户输入忽略                 |
+| DISPLAY     | 采样模式下忽略所有用户返回输入；普通模式允许返回 |
+| BOOTING     | 用户输入忽略                   |
+| ERROR       | 仅允许重试或返回安全页              |
+
+---
+
+### 8.6 状态超时规则
+
+| 状态          | 超时阈值 | 行为               |
+| ----------- | ---- | ---------------- |
+| INFERENCING | >3 秒 | 触发 `INFER_FAIL`  |
+| RECORDING   | >1 秒 | 触发 `RECORD_FAIL` |
+| DISPLAY     | >5 秒 | 触发 `TIMEOUT`     |
+
+---
+
+## 9. 核心业务流程
+
+### 9.1 关于启动与“2 秒进入取景界面”的解释
+
+本系统启动默认进入 `HOME`，而不是直接进入 `PREVIEW`。
+因此，“2 秒进入取景界面”在本架构中的解释为：
+
+* **系统启动后应尽快进入 `HOME`**
+* **在 `HOME` 默认高亮普通模式的前提下，用户确认普通模式后，系统应在 2 秒内进入取景界面**
+
+也就是说，2 秒目标适用于**普通模式确认后的取景进入时延**，而非冷启动后直接进入取景。
+
+这一定义用于消解“系统启动进入首页”与“进入取景界面”的要求张力，并作为后续实现与验收的统一解释口径。
+
+---
+
+### 9.2 普通模式识别流程
+
+```text
+HOME
+→ PREVIEW
+→ CAPTURED
+→ INFERENCING
+→ DISPLAY
+→ PREVIEW
+```
+
+#### 详细说明
+
+1. 用户在首页选择普通模式
+2. 进入 `PREVIEW`，显示实时取景与准星
+3. 按确认键后抓取当前帧
+4. 进入推理
+5. 生成识别结果
+6. 在 `DISPLAY` 中显示植物名称/置信度或“未识别”
+7. 5 秒后自动返回 `PREVIEW`，或长按返回
+
+---
+
+### 9.3 采样模式识别流程
+
+```text
+HOME
+→ MAP_SELECT
+→ REGION_SELECT
+→ PREVIEW
+→ CAPTURED
+→ INFERENCING
+→ DISPLAY
+→ RECORDING
+→ PREVIEW
+```
+
+#### 关键规则
+
+* 只有在采样模式下才允许 `RECORDING`
+* 只有在识别成功且置信度达到阈值时才记录
+* 若结果为“未识别”，`DISPLAY` 结束后直接回 `PREVIEW`，不进入 `RECORDING`
+* 若结果满足记录条件，`DISPLAY` 结束后必须进入 `RECORDING`
+* 用户不得通过返回操作取消该记录流程
+
+---
+
+### 9.4 统计查看流程
+
+```text
+REGION_SELECT
+→ STATS
+→ REGION_SELECT
+```
+
+#### 规则
+
+* `STATS` 入口固定从 `REGION_SELECT` 进入
+* 不提供 `PREVIEW -> STATS` 快捷入口
+* 统计页退出后固定返回 `REGION_SELECT`
+
+#### 展示内容
+
+* 当前 Region 的植物种类数
+* 每个植物的数量
+* 每个植物最后一次置信度
+* 无数据时显示空态
+
+---
+
+## 10. 识别链路设计
+
+### 10.1 识别处理管线
+
+```text
+Preview Frame
+→ Capture Frame
+→ Preprocess
+→ TFLite Inference
+→ Postprocess
+→ Label Mapping
+→ Threshold Decision
+→ RecognitionResult
+```
+
+### 10.2 RecognitionResult 定义
+
+```text
+plant_name
+display_name
+confidence
+is_recognized
+```
+
+#### 说明
+
+* `plant_name`：用于持久化与规则判断
+* `display_name`：用于 UI 展示
+* `confidence`：标准化后的置信度百分比或小数值
+* `is_recognized`：领域层明确标记，避免 UI 再次判断
+
+---
+
+### 10.3 标签映射规则
+
+由于当前数据集是 30 类平衡分类任务，`LabelRepository` 必须保证模型输出索引与标签文件一一对应。
+若输出维度与标签数不一致，则模型部署无效。
+
+---
+
+### 10.4 置信度规则
+
+* Top-1 类别作为候选输出
+* 置信度低于 60% 时统一视为“未识别”
+* UI 不参与阈值判断
+* `SamplingRecorder` 只接受 `is_recognized = true` 的结果
+
+---
+
+## 11. 输入与交互设计
+
+### 11.1 物理输入方案
+
+采用两键方案：
+
+* `CONFIRM`：确认 / 拍照
+* `NAV`：选项切换 / 页面内浏览
+* `BACK_LONG_PRESS`：通过长按触发返回
+
+#### 补充约束
+
+* 在 `REGION_SELECT` 中，长按 `NAV` 触发 `STATS` 入口
+* 在普通模式 `DISPLAY` 中，允许长按返回
+* 在采样模式 `DISPLAY` 中，不允许通过长按跳过记录
+
+---
+
+### 11.2 与“单按键核心操作”验收项的关系
+
+“单按键完成核心操作”解释为：
+
+* 在**普通识别主链路**中，用户通过单一确认键即可完成拍照触发与识别闭环
+* 系统导航层允许使用第二键与长按返回
+
+因此不存在需求冲突。
+
+---
+
+### 11.3 去抖与连续触发保护
+
+* 最小拍照间隔：300ms
+* 推理中输入忽略
+* 记录中输入忽略
+* 长按事件必须经过去抖与持续时间判定
+
+---
+
+## 12. UI 架构
+
+### 12.1 页面与状态映射
+
+| 状态            | 页面              |
+| ------------- | --------------- |
+| BOOTING       | 启动画面            |
+| HOME          | 模式选择页           |
+| MAP_SELECT    | 地图选择页           |
+| REGION_SELECT | 区域选择页           |
+| PREVIEW       | 实时取景页           |
+| INFERENCING   | 中央提示覆盖层         |
+| DISPLAY       | 结果展示页           |
+| RECORDING     | 沿用 Display 或轻提示 |
+| STATS         | 统计页             |
+| ERROR         | 错误提示页           |
+
+---
+
+### 12.2 页面最小要求
+
+#### Preview
+
+* 全屏预览
+* 中央准星
+* 帧率目标 ≥15 FPS
+
+#### Inferencing
+
+* 居中显示“AI识别中”
+
+#### Display
+
+* 屏幕底部 1/3 区域显示结果
+* 成功时显示植物名称和置信度
+* 失败时显示“未识别”
+
+#### Home / Map / Region
+
+* 当前选项高亮
+
+#### Stats
+
+* 显示植物种类总数
+* 显示每种植物数量
+* 显示每种植物最后一次置信度
+
+---
+
+## 13. 错误处理与恢复设计
+
+### 13.1 错误分类
+
+* `CameraError`
+* `InferenceError`
+* `StorageError`
+* `DataError`
+* `ConfigError`
+* `ModelError`
+* `LabelError`
+* `ReleaseGateError`
+
+---
+
+### 13.2 错误处理策略
+
+统一原则：
+
+```text
+Fail Fast
+→ Show Error
+→ Return Safe State
+```
+
+---
+
+### 13.3 具体错误回退路径
+
+| 错误               | 触发时机       | 回退策略                  |
+| ---------------- | ---------- | --------------------- |
+| CameraError      | 启动或抓帧      | 进入 ERROR；不可进入 PREVIEW |
+| ModelError       | 模型加载失败     | 启动失败，进入 ERROR         |
+| LabelError       | 标签缺失/数量不符  | 启动失败，进入 ERROR         |
+| ConfigError      | 采样配置非法     | 启动失败，进入 ERROR         |
+| ReleaseGateError | 模型发布门禁未通过  | 启动失败，进入 ERROR         |
+| DataError        | 读取 JSON 失败 | 显示错误；统计不可用；识别功能可继续    |
+| StorageError     | 写入失败       | 显示错误；不阻塞后续返回 PREVIEW  |
+| InferenceError   | 推理异常/超时    | 显示错误；返回 PREVIEW       |
+
+---
+
+### 13.4 ERROR 行为与恢复策略表
+
+| 错误类型             | 是否进入 ERROR | 是否允许重试 | 重试成功后去向 | 不重试时去向   |
+| ---------------- | ---------- | ------ | ------- | -------- |
+| CameraError      | 是          | 是      | HOME    | ERROR 停留 |
+| ModelError       | 是          | 是      | HOME    | ERROR 停留 |
+| LabelError       | 是          | 是      | HOME    | ERROR 停留 |
+| ConfigError      | 是          | 是      | HOME    | ERROR 停留 |
+| ReleaseGateError | 是          | 否      | 无       | ERROR 停留 |
+| DataError        | 否          | 不适用    | 不适用     | 保持当前安全流程 |
+| StorageError     | 否          | 否      | 不适用     | PREVIEW  |
+| InferenceError   | 否          | 否      | 不适用     | PREVIEW  |
+
+#### 说明
+
+* `ReleaseGateError` 本质是部署级错误，不应允许运行时重试解决
+* `DataError` 属于降级继续，不进入 `ERROR`
+* `StorageError` 和 `InferenceError` 均以“提示 + 返回安全状态”为主，不进入 `ERROR`
+
+---
+
+## 14. 性能、稳定性与可验收设计
+
+### 14.1 性能预算
+
+关键时延目标：
+
+* 拍照 ≤0.2s
+* 推理 ≤2.5s
+* 全流程 ≤3s
+
+本架构将其拆解为：
+
+| 阶段         | 预算     |
+| ---------- | ------ |
+| 按键到抓帧开始    | ≤100ms |
+| 抓帧完成       | ≤100ms |
+| 推理         | ≤2.5s  |
+| 后处理 + 显示准备 | ≤200ms |
+| 总计         | ≤2.9s  |
+
+---
+
+### 14.2 启动预算
+
+本系统启动默认进入 `HOME`，因此冷启动目标应拆分为：
+
+| 阶段                     | 目标          |
+| ---------------------- | ----------- |
+| 冷启动进入 HOME             | 尽可能快，建议 ≤2s |
+| HOME 确认普通模式后进入 PREVIEW | ≤2s         |
+
+#### 必要初始化
+
+* system_config
+* labels
+* sampling_config
+* model
+* camera health check
+* input init
+* release gate 校验
+
+#### 可延后初始化
+
+* 各 region 数据懒加载
+* stats 页面数据按需加载
+
+---
+
+### 14.3 长时稳定性约束
+
+为支撑“连续运行 ≥1 小时无崩溃”与“连续使用 ≥3 小时”的要求，架构层增加以下约束：
+
+1. 预览帧对象不得在状态间长期缓存多个副本
+2. 推理输入缓冲区必须复用或及时释放
+3. UI 页面资源不得在每次状态切换时重复构建不可释放对象
+4. JSON 写入采用短事务方式，不保留长期文件句柄
+5. 日志输出采用可控级别，避免长时运行导致磁盘无界增长
+6. 识别主循环需支持长时运行自检日志
+
+#### 说明
+
+这意味着“长时稳定性”不只是测试事项，而是已转化为实现约束。
+
+---
+
+### 14.4 可观测性设计
+
+为支撑验收与调试，系统必须记录最少量运行日志。
+
+#### 启动日志
+
+* 模型加载耗时
+* 标签加载耗时
+* 配置加载结果
+* 相机初始化耗时
+* 发布门禁校验结果
+
+#### 流程日志
+
+* 状态迁移
+* 抓帧耗时
+* 推理耗时
+* 写入耗时
+* 错误事件
+* 连续运行心跳日志
+
+#### 建议输出格式
+
+```text
+[timestamp] [state] [event] [duration_ms] [result]
+```
+
+#### 长时运行心跳
+
+建议每隔固定时段记录：
+
+```text
+[timestamp] [heartbeat] [uptime_s] [memory_snapshot] [preview_fps]
+```
+
+#### 价值
+
+这用于证明：
+
+* 启动时延
+* 取景帧率
+* 推理时延
+* 记录时延
+* 连续 30 次操作稳定性
+* 1 小时与 3 小时运行稳定性
+
+---
+
+## 15. 准确率目标的架构支撑
+
+### 15.1 原则
+
+“Top-1 准确率 ≥85%”主要是模型质量目标，但架构必须提供发布与部署约束，避免低质量模型进入系统。
+
+### 15.2 架构化支撑方式
+
+本架构采用以下支撑：
+
+1. `ReleaseGateService` 校验模型评估结果
+2. `model_manifest.json` 显式记录已评估的 Top-1 准确率
+3. 启动期校验模型输出维度、标签数量、阈值配置
+4. 仅允许通过门禁的模型进入正式部署
+5. 阈值配置由 `system_config.json` 管理，避免实现期硬编码
+
+### 15.3 发布门槛
+
+建议将以下条件作为正式部署门槛：
+
+* `evaluated_top1_accuracy ≥ 0.85`
+* `output_classes = 30`
+* 标签文件合法且与模型一致
+* 阈值配置有效
+* 推理链路离线验证通过
+
+### 15.4 说明
+
+架构的职责不是“生成一个好模型”，
+而是**保证只有满足准确率门槛的模型才会进入设备**。
+这就是准确率要求在架构层的落点。
+
+---
+
+## 16. 部署架构
+
+### 16.1 运行模式
+
+* 单进程
+* 单线程
+* 本地文件系统持久化
+* 本地模型文件加载
+
+### 16.2 启动流程
+
+```text
+加载 system_config
+→ 加载 labels
+→ 加载 sampling_config
+→ 加载 model_manifest
+→ 初始化 input
+→ 初始化 camera
+→ 加载 model
+→ 执行 release gate 校验
+→ 进入 HOME
+```
+
+#### 说明
+
+与 V2 相比，本版将 `model_manifest` 与 `release gate` 纳入正式启动链路，并将启动目标明确收敛到 `HOME`。
+
+---
+
+## 17. 目录结构建议
+
+```text
+app/
+  main.py
+  controller/
+    app_controller.py
+  application/
+    state_machine.py
+    state_context.py
+    events.py
+  domain/
+    models.py
+    recognition_service.py
+    sampling_recorder.py
+    statistics_query_service.py
+    release_gate_service.py
+    rules.py
+  infrastructure/
+    camera/
+      picamera2_adapter.py
+    input/
+      gpio_button_adapter.py
+      keyboard_adapter.py
+    inference/
+      tflite_adapter.py
+    storage/
+      json_storage_adapter.py
+    config/
+      system_config_repository.py
+      sampling_config_repository.py
+      label_repository.py
+      model_manifest_repository.py
+  presentation/
+    renderer.py
+    pages/
+      home_page.py
+      map_page.py
+      region_page.py
+      preview_page.py
+      display_page.py
+      stats_page.py
+      error_page.py
+config/
+  system_config.json
+  labels.json
+  sampling_config.json
+  model_manifest.json
+data/
+  regions/
+logs/
+```
+
+---
+
+## 18. 风险清单与缓解
+
+### 18.1 关键风险
+
+#### 1. 置信度映射风险
+
+模型若输出为量化 uint8 或未经 softmax 处理的分值，可能导致“60% 阈值”解释错误。
+**缓解**：在 `InferenceAdapter` 中固定后处理策略，并通过离线样本验证。
+
+#### 2. 标签映射风险
+
+模型输出索引与标签文件若不一致，会直接导致识别类别错误。
+**缓解**：启动时校验标签数量与输出维度。当前应为 30 类。
+
+#### 3. 相机与 UI 兼容风险
+
+树莓派显示链路与相机预览可能出现刷新、拉伸或性能问题。
+**缓解**：优先验证 `Preview` 页帧率与抓帧延迟，先打通最小预览闭环。
+
+#### 4. JSON 断电一致性风险
+
+写文件时异常中断可能造成损坏。
+**缓解**：采用临时文件 + rename 原子写入。
+
+#### 5. GPIO 长按误触发风险
+
+按键抖动、长按时长判定不稳可能造成返回误触发。
+**缓解**：统一去抖与长按识别时序。
+
+#### 6. 树莓派 2GB 内存风险
+
+模型、预览帧缓存、UI 资源叠加后可能造成内存波动。
+**缓解**：控制图像中间对象生命周期，避免重复缓存全尺寸帧。
+
+#### 7. 启动时间超标风险
+
+若启动时做过多无关 IO，可能影响进入 `HOME` 或普通模式进入 `PREVIEW` 的目标时延。
+**缓解**：stats 数据按需加载，启动只做必要初始化。
+
+#### 8. 低质量模型误部署风险
+
+若模型评估结果未被纳入部署门禁，可能导致准确率不达标模型被部署。
+**缓解**：引入 `ReleaseGateService + model_manifest.json`。
+
+---
+
+## 19. 与验收标准的映射
+
+| 验收要求             | 架构保障机制                                                      |
+| ---------------- | ----------------------------------------------------------- |
+| 启动进入首页           | 启动流程固定落点为 HOME                                              |
+| 普通模式确认后 2 秒内进入取景 | 默认高亮普通模式 + 启动预算 + 进入 PREVIEW 时延约束                           |
+| 取景帧率 ≥15 FPS     | Preview 常驻预览链路 + 帧率观测                                       |
+| 按键响应 ≤200ms      | 输入归一化 + 抓帧预算拆分                                              |
+| 推理 ≤2.5s         | InferenceAdapter 预算 + 超时机制                                  |
+| 全流程 ≤3s          | 全链路预算拆分                                                     |
+| 置信度 <60% 输出未识别   | RecognitionService 统一阈值规则                                   |
+| 低置信度不记录          | SamplingRecorder 仅接收 recognized 结果                          |
+| 识别成功后自动记录        | 采样模式 DISPLAY → RECORDING 强制转移                               |
+| 数据按 Region 保存    | 每 Region 一个 JSON 文件                                         |
+| 写入数据包含名称、置信度、时间戳 | RegionStatsFile 中保存 plant_name、last_confidence、last_seen_at |
+| 系统重启后数据仍存在       | JSON 持久化                                                    |
+| 数据损坏时提示错误        | DataError 降级策略                                              |
+| 显示后 5 秒自动返回      | DISPLAY 状态超时规则                                              |
+| 推理/记录中忽略输入       | 状态机非法事件处理                                                   |
+| 连续运行 1 小时/3 小时稳定 | 长时稳定性约束 + 心跳日志                                              |
+| Top-1 准确率 ≥85%   | ReleaseGateService + model_manifest 发布门禁                    |
+
+---
+
+## 20. 最终架构结论
+
+本系统的最终架构定义为：
+
+> 一个基于**单线程状态机驱动**的离线植物识别与区域采样系统；
+> 其以**适配器隔离外部依赖**，以**状态驱动 UI**，以**领域规则约束识别、记录与统计**，以**本地 JSON 实现受控持久化**，并通过**显式错误回退、发布门禁与最小可观测性设计**支撑实现、部署与验收。
+
+---
+
+## 21. 相比 V2 的最终收口总结
+
+本版相对 V2 完成以下最终修订：
+
+1. 明确系统启动默认进入 `HOME`
+2. 明确“2 秒进入取景”仅适用于普通模式确认后
+3. 明确采样模式下 `DISPLAY` 不允许取消记录
+4. 冻结 `STATS` 入口，仅允许从 `REGION_SELECT` 进入
+5. 增加 `last_confidence` 持久化字段
+6. 显式区分 `RecordEvent` 与 `RegionStatsFile`
+7. 增加 `ERROR` 恢复策略表
+8. 将长时运行稳定性转化为架构约束
+9. 增加 `ReleaseGateService` 与 `model_manifest.json`
+10. 将准确率要求转化为模型发布与部署门禁
+
+---
+
+```
+```

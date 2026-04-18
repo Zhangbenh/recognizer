@@ -1,0 +1,395 @@
+````markdown
+# 数据与配置确认阶段说明书（归档版）
+## 阶段：2.3 数据与配置确定  
+## 基线来源：架构设计_v2.1 + 状态机设计 v2.0 + 代码结构设计 v1.3.1
+
+---
+
+# 0. 文档定位
+
+本说明书用于**冻结并说明本项目所有数据结构与配置契约**，作为后续开发阶段（原型验证、编码实现、联调测试）的**唯一参考依据之一**。
+
+本阶段目标：
+
+> 在进入编码前，彻底确定“数据长什么样、配置如何表达、持久化如何组织”。
+
+---
+
+# 1. 阶段完成定义
+
+本阶段完成必须满足：
+
+- 所有核心 JSON 结构已确定（字段、类型、语义）
+- 不再在开发过程中修改“结构”，只允许修改“值”
+- 与以下三份文档完全一致：
+  - 架构设计
+  - 状态机设计
+  - 代码结构设计
+- 能直接支持：
+  - 状态机运行
+  - Domain 规则执行
+  - Adapter 读写
+  - UI 渲染
+
+---
+
+# 2. 配置与数据总览
+
+本项目配置与数据分为两类：
+
+## 2.1 静态配置（config/）
+
+| 文件名 | 作用 |
+|--------|------|
+| `system_config.json` | 系统运行参数 |
+| `labels.json` | 模型标签映射 |
+| `sampling_config.json` | Map / Region 结构 |
+| `model_manifest.json` | 模型部署契约 |
+
+---
+
+## 2.2 运行数据（data/）
+
+| 路径 | 作用 |
+|------|------|
+| `data/regions/region_<id>.json` | 每个 Region 的统计数据 |
+
+---
+
+# 3. labels.json（标签映射）
+
+## 3.1 作用
+
+定义模型输出索引与植物类别的映射关系。
+
+---
+
+## 3.2 结构定义
+
+```json
+{
+  "version": "v1.0",
+  "labels": [
+    {
+      "index": 0,
+      "plant_name": "rose",
+      "display_name": "Rose"
+    }
+  ]
+}
+````
+
+---
+
+## 3.3 字段说明
+
+| 字段           | 含义          |
+| ------------ | ----------- |
+| index        | 模型输出索引      |
+| plant_name   | 内部唯一标识（稳定键） |
+| display_name | UI 显示名称     |
+
+---
+
+## 3.4 约束（硬规则）
+
+* index 必须从 0 连续递增
+* 数量必须 = 模型输出类别数（30）
+* `plant_name`：
+
+  * 小写
+  * 无空格
+  * 稳定不变
+* `display_name`：
+
+  * 用于 UI
+  * 可读性优先
+
+---
+
+# 4. sampling_config.json（地图与区域）
+
+## 4.1 作用
+
+定义采样模式中的 Map 与 Region 结构。
+
+---
+
+## 4.2 结构定义
+
+```json
+{
+  "maps": [
+    {
+      "map_id": "campus",
+      "display_name": "Campus",
+      "regions": [
+        {
+          "region_id": "north_garden",
+          "display_name": "North Garden"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## 4.3 约束
+
+* map ≥ 1（推荐 ≥3）
+* 每个 map 的 region ≥1（推荐 ≥4）
+* `region_id` 全局唯一
+* 不允许运行期出现空 Region
+
+---
+
+## 4.4 用途
+
+* MAP_SELECT
+* REGION_SELECT
+* RECORDING
+* STATS
+* 文件命名（region_<id>.json）
+
+---
+
+# 5. system_config.json（系统配置）
+
+## 5.1 作用
+
+控制系统运行行为、性能阈值与交互逻辑。
+
+---
+
+## 5.2 结构定义
+
+```json
+{
+  "recognition_threshold": 0.6,
+  "display_timeout_s": 5.0,
+  "infer_timeout_s": 3.0,
+  "record_timeout_s": 1.0,
+  "long_press_threshold_ms": 800,
+  "capture_debounce_ms": 300,
+  "log_level": "INFO",
+  "release_gate": {
+    "min_top1_accuracy": 0.85
+  }
+}
+```
+
+---
+
+## 5.3 关键参数说明
+
+### 识别阈值
+
+* `recognition_threshold = 0.6`
+* 用于判定是否“识别成功”
+
+---
+
+### 超时控制
+
+| 参数                | 状态          |
+| ----------------- | ----------- |
+| infer_timeout_s   | INFERENCING |
+| display_timeout_s | DISPLAY     |
+| record_timeout_s  | RECORDING   |
+
+---
+
+### 输入控制
+
+* `long_press_threshold_ms`：长按识别
+* `capture_debounce_ms`：防抖
+
+---
+
+### 发布门禁
+
+* `min_top1_accuracy = 0.85`
+
+---
+
+## 5.4 约束
+
+* 不允许 UI 硬编码阈值
+* 不允许状态机写死时间
+* 所有超时必须来自此配置
+
+---
+
+# 6. model_manifest.json（模型契约）
+
+## 6.1 作用
+
+定义模型与系统之间的**部署契约与校验依据**。
+
+---
+
+## 6.2 结构定义
+
+```json
+{
+  "model_version": "plant_classifier_int8_v1",
+  "model_file": "plant_classifier_int8.tflite",
+  "output_classes": 30,
+  "training_dataset_name": "reymond/plants_type_dataset",
+  "evaluated_top1_accuracy": 0.8713,
+  "quantization_type": "int8",
+  "input_shape": [1, 224, 224, 3],
+  "input_dtype": "uint8",
+  "output_dtype": "uint8",
+  "label_version": "v1.0",
+  "created_at": "2026-04-18T00:00:00Z"
+}
+```
+
+---
+
+## 6.3 校验规则
+
+必须满足：
+
+* output_classes == labels数量
+* accuracy ≥ 0.85
+* dtype 与实际模型一致
+* shape 与模型一致
+* label_version 一致
+
+---
+
+## 6.4 用途
+
+* BOOTING 阶段校验
+* ReleaseGateService
+* 推理一致性验证
+
+---
+
+# 7. Region JSON（统计数据）
+
+## 7.1 文件路径
+
+```text
+data/regions/region_<region_id>.json
+```
+
+---
+
+## 7.2 结构定义
+
+```json
+{
+  "region_id": "north_garden",
+  "plant_count": 2,
+  "items": [
+    {
+      "plant_name": "rose",
+      "display_name": "Rose",
+      "count": 5,
+      "last_confidence": 0.87,
+      "last_seen_at": "2026-04-18T10:00:00Z"
+    }
+  ],
+  "updated_at": "2026-04-18T10:00:00Z"
+}
+```
+
+---
+
+## 7.3 规则
+
+* 每个 Region 一个文件
+* 唯一键：`plant_name + region_id`
+* 行为：
+
+| 情况  | 处理                             |
+| --- | ------------------------------ |
+| 已存在 | count +1                       |
+| 新植物 | 新建 item                        |
+| 更新  | last_confidence / last_seen_at |
+
+---
+
+## 7.4 限制
+
+* 最大种类数：50
+* 单个 count：≤999
+* 文件大小：≤1MB
+
+---
+
+# 8. 跨模块一致性
+
+## 8.1 与状态机一致
+
+* DISPLAY → RECORDING 依赖 `is_recognized`
+* RECORDING 使用 Region JSON
+* STATS 使用 snapshot
+
+---
+
+## 8.2 与 Domain 一致
+
+* RecognitionResult ← labels.json
+* SamplingRecorder ← Region JSON
+* StatisticsQuery ← Region JSON
+
+---
+
+## 8.3 与代码结构一致
+
+* Repository 读取 config
+* Adapter 读写 JSON
+* Domain 不接触文件系统
+
+---
+
+# 9. 不允许修改的内容（冻结项）
+
+以下内容进入冻结状态：
+
+* JSON 字段结构
+* 字段命名
+* 数据模型定义
+* 文件路径结构
+* 关键约束（30类、threshold、分页大小等）
+
+---
+
+# 10. 后续开发使用方式
+
+## 10.1 原型阶段
+
+* 直接读取这些 JSON
+* 不修改结构
+
+---
+
+## 10.2 编码阶段
+
+* Repository 按本结构实现
+* Domain 直接使用这些模型
+
+---
+
+## 10.3 测试阶段
+
+* 构造测试数据必须符合本结构
+* 不允许出现“测试专用结构”
+
+---
+
+# 11. 一句话总结
+
+> 本阶段完成后，系统的**数据契约已经完全冻结**：
+> 所有模块（状态机 / Domain / Adapter / UI）必须围绕这些结构展开，而不是反向修改它们。
+
+---
+
+```
+```

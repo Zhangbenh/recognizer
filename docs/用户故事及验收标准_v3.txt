@@ -1,0 +1,544 @@
+```markdown
+# 《用户故事与验收标准（工程规范版 V3）》
+## 便携式离线植物识别器（含区域采样系统）
+
+---
+
+# 一、用户故事分层
+
+- Epic（用户目标）
+- Feature（能力模块）
+- User Story（用户价值单元）
+
+---
+
+# Epic 1：核心识别体验
+
+---
+
+## Feature 1.1 实时取景系统
+
+### US-1.1.1 实时取景显示
+
+**User Story**
+
+- As 用户  
+- I want 实时看到摄像头画面  
+- So that 我能够准确对准目标植物  
+
+**验收标准**
+
+- Given 设备开机  
+  When 系统初始化完成  
+  Then 在2秒内进入取景界面  
+
+- Given 取景界面运行中  
+  When 系统稳定运行  
+  Then 帧率应 ≥15 FPS  
+
+- Given 取景界面  
+  When 用户观察屏幕  
+  Then 屏幕中央显示准星  
+
+- Given 连续运行10分钟  
+  When 用户持续使用  
+  Then 系统无卡死或崩溃  
+
+- Given 摄像头异常  
+  When 无法获取图像  
+  Then 显示错误提示  
+
+---
+
+## Feature 1.2 图像抓取
+
+### US-1.2.1 按键拍照
+
+**User Story**
+
+- As 用户  
+- I want 快速拍摄当前画面  
+- So that 捕捉清晰的植物图像  
+
+**验收标准**
+
+- Given 用户按下拍照键  
+  When 按键触发  
+  Then 系统响应时间 ≤200ms  
+
+- Given 拍照触发  
+  When 图像冻结  
+  Then 冻结误差 ≤1帧  
+
+- Given 拍照成功  
+  When 图像生成  
+  Then 输出有效图像数据  
+
+- Given 用户连续按键  
+  When 触发频率过高  
+  Then 系统不产生重复拍照  
+
+---
+
+## Feature 1.3 离线识别
+
+### US-1.3.1 离线推理
+
+**User Story**
+
+- As 用户  
+- I want 在无网络情况下识别植物  
+- So that 能在任何环境下使用设备  
+
+**验收标准**
+
+- Given 无网络连接  
+  When 用户发起识别  
+  Then 系统仍可执行推理  
+
+- Given 图像输入  
+  When 开始推理  
+  Then 推理时间 ≤2.5秒  
+
+- Given 推理执行中  
+  When 系统处理  
+  Then 显示“AI识别中”提示  
+
+- Given 推理成功  
+  When 识别完成  
+  Then 返回分类结果  
+
+- Given 推理失败  
+  When 模型异常  
+  Then 显示失败提示  
+
+---
+
+## Feature 1.4 结果展示
+
+### US-1.4.1 识别结果显示
+
+**User Story**
+
+- As 用户  
+- I want 清晰看到识别结果  
+- So that 理解识别结果的可信度  
+
+**验收标准**
+
+- Given 识别成功  
+  When 展示结果  
+  Then 显示植物名称  
+
+- Given 识别成功  
+  When 展示结果  
+  Then 显示置信度  
+
+- Given 显示结果  
+  When UI渲染  
+  Then 结果位于屏幕底部1/3区域  
+
+- Given 识别失败  
+  When 无有效结果  
+  Then 显示“未识别”提示  
+
+---
+
+## Feature 1.5 流程闭环
+
+### US-1.5.1 完整识别流程
+
+**User Story**
+
+- As 用户  
+- I want 完成一次完整识别流程  
+- So that 可以连续进行识别  
+
+**验收标准**
+
+- Given 用户进入取景  
+  When 执行完整操作  
+  Then 流程为：取景→拍照→推理→显示  
+
+- Given 显示完成  
+  When 用户未操作  
+  Then 5秒内自动返回取景  
+
+- Given 显示结果  
+  When 用户操作  
+  Then 支持手动返回取景  
+
+- Given 任意流程阶段  
+  When 系统运行  
+  Then 无死锁状态  
+
+---
+
+# Epic 2：识别质量
+
+---
+
+## Feature 2.1 准确率
+
+### US-2.1.1 高质量识别
+
+**User Story**
+
+- As 用户  
+- I want 获得准确识别结果  
+- So that 可以信任设备输出  
+
+**验收标准**
+
+- Given 标准测试集  
+  When 执行识别  
+  Then Top-1准确率 ≥85%  
+
+- Given 模型部署  
+  When 系统运行  
+  Then 支持 ≥30类植物  
+
+---
+
+## Feature 2.2 拒识机制
+
+### US-2.2.1 低置信度处理
+
+**User Story**
+
+- As 用户  
+- I want 系统避免错误识别  
+- So that 不被误导  
+
+**验收标准**
+
+- Given 置信度 <60%  
+  When 推理完成  
+  Then 输出“未识别”  
+
+- Given 低置信度  
+  When 系统判断  
+  Then 不输出错误类别  
+
+---
+
+# Epic 3：区域采样系统
+
+---
+
+## Feature 3.1 模式入口
+
+### US-3.1.1 模式选择
+
+**User Story**
+
+- As 用户  
+- I want 选择系统模式  
+- So that 进入不同功能场景  
+
+**验收标准**
+
+- Given 系统启动  
+  When 进入首页  
+  Then 显示模式选择界面  
+
+- Given 首页  
+  When 用户操作  
+  Then 提供“识别模式”和“采样模式”  
+
+- Given 用户操作  
+  When 按键切换  
+  Then 当前选项高亮  
+
+---
+
+## Feature 3.2 地图选择
+
+### US-3.2.1 采样任务选择
+
+**User Story**
+
+- As 用户  
+- I want 选择采样任务  
+- So that 在特定场景下记录数据  
+
+**验收标准**
+
+- Given 进入采样模式  
+  When 显示列表  
+  Then 至少显示3个地图  
+
+- Given 地图列表  
+  When 用户选择  
+  Then 可进入地图  
+
+- Given 无地图  
+  When 进入页面  
+  Then 显示“无可用地图”  
+
+---
+
+## Feature 3.3 区域选择
+
+### US-3.3.1 区域选择
+
+**User Story**
+
+- As 用户  
+- I want 选择采样区域  
+- So that 分类记录植物  
+
+**验收标准**
+
+- Given 进入地图  
+  When 显示区域  
+  Then 至少显示4个区域  
+
+- Given 区域列表  
+  When 用户选择  
+  Then 当前区域高亮  
+
+- Given 选择区域  
+  When 确认  
+  Then 进入识别界面  
+
+---
+
+## Feature 3.4 区域识别
+
+### US-3.4.1 区域内识别
+
+**User Story**
+
+- As 用户  
+- I want 在区域内识别植物  
+- So that 采集区域数据  
+
+**验收标准**
+
+- Given 已进入区域  
+  When 用户操作  
+  Then 执行识别流程  
+
+---
+
+## Feature 3.5 自动记录
+
+### US-3.5.1 自动记录识别结果
+
+**User Story**
+
+- As 用户  
+- I want 自动记录识别结果  
+- So that 无需手动管理数据  
+
+**验收标准**
+
+- Given 识别成功  
+  When 置信度 ≥60%  
+  Then 写入记录  
+
+- Given 识别失败  
+  When 置信度 <60%  
+  Then 不记录  
+
+- Given 写入记录  
+  When 数据生成  
+  Then 包含名称  
+
+- Given 写入记录  
+  When 数据生成  
+  Then 包含置信度  
+
+- Given 写入记录  
+  When 数据生成  
+  Then 包含时间戳  
+
+- Given 存储失败  
+  When 写入数据  
+  Then 显示错误提示  
+
+---
+
+## Feature 3.6 去重与统计
+
+### US-3.6.1 数据统计
+
+**User Story**
+
+- As 用户  
+- I want 查看统计结果  
+- So that 了解区域内植物情况  
+
+**验收标准**
+
+- Given 同一植物  
+  When 多次识别  
+  Then 不新增重复条目  
+
+- Given 同一植物  
+  When 再次识别  
+  Then count +1  
+
+---
+
+## Feature 3.7 数据持久化
+
+### US-3.7.1 数据保存
+
+**User Story**
+
+- As 用户  
+- I want 数据长期保存  
+- So that 可持续查看结果  
+
+**验收标准**
+
+- Given 写入数据  
+  When 操作完成  
+  Then 保存为本地JSON  
+
+- Given 系统重启  
+  When 重新进入  
+  Then 数据仍存在  
+
+- Given 数据读取  
+  When 系统加载  
+  Then 成功率100%  
+
+- Given 数据损坏  
+  When 读取失败  
+  Then 提示错误  
+
+---
+
+## Feature 3.8 数据查看
+
+### US-3.8.1 查看统计结果
+
+**User Story**
+
+- As 用户  
+- I want 查看采样结果  
+- So that 了解植物分布  
+
+**验收标准**
+
+- Given 进入区域数据页  
+  When 查看数据  
+  Then 显示植物种类数  
+
+- Given 数据展示  
+  When 渲染  
+  Then 显示每种数量  
+
+---
+
+# Epic 4：系统可靠性
+
+---
+
+## Feature 4.1 环境适应
+
+**验收标准**
+
+- Given 环境温度  
+  When 运行  
+  Then 支持 0~40℃  
+
+- Given 连续运行  
+  When 使用  
+  Then ≥3小时  
+
+---
+
+## Feature 4.2 稳定性
+
+**验收标准**
+
+- Given 长时间运行  
+  When 使用  
+  Then ≥1小时无崩溃  
+
+- Given 系统运行  
+  When 监测  
+  Then 内存稳定  
+
+---
+
+# Epic 5：用户体验
+
+---
+
+## Feature 5.1 极简交互
+
+**验收标准**
+
+- Given 用户操作  
+  When 使用设备  
+  Then 单按键完成核心操作  
+
+---
+
+## Feature 5.2 UI规范
+
+**验收标准**
+
+- Given 取景界面  
+  When 显示  
+  Then 全屏 + 准星  
+
+- Given 推理中  
+  When 运行  
+  Then 居中提示  
+
+- Given 显示结果  
+  When 渲染  
+  Then 底部面板  
+
+---
+
+# 二、系统级验收标准
+
+---
+
+## 普通模式
+
+```
+
+取景 → 拍照 → 推理 → 显示 → 返回
+
+```
+
+---
+
+## 采样模式
+
+```
+
+首页 → 地图 → 区域 → 识别 → 自动记录 → 继续
+
+```
+
+---
+
+## 全局约束
+
+- Given 完整流程  
+  When 执行  
+  Then ≤3秒  
+
+- Given 连续操作  
+  When 执行30次  
+  Then 无崩溃  
+
+- Given 数据记录  
+  When 写入  
+  Then 准确  
+
+---
+
+# 三、总结
+
+> 本版本为高规范用户故事与验收标准文档（SRS v1.0）
+```

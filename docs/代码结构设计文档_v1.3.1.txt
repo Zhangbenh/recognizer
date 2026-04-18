@@ -1,0 +1,2831 @@
+````markdown
+# 代码结构设计文档 v1.3（最终归档版）
+## 基于《架构设计_v2.1》与《状态机详细设计 v2.0》的唯一实现依据
+
+---
+
+# 0. 文档定位
+
+本文件是本项目在“状态机详细设计完成之后”的**代码结构唯一实现依据**。  
+它不是概要说明，不是建议稿，也不是便于讨论的草稿，而是后续编码、联调、评审时应直接遵循的结构性规范。
+
+本文件解决的问题只有一类：
+
+> **代码应该如何组织，模块应该如何划分，类应该如何定义，接口应该如何收口，依赖应该如何流动。**
+
+本文件不再讨论需求是否合理，也不再重复架构设计与状态机设计的高层决策；它只负责把这些冻结决策**落实为可以直接编码的代码结构**。本项目的整体架构基线已经固定为：单线程状态机驱动、适配器隔离外部依赖、状态驱动 UI、领域规则约束识别/记录/统计、本地 JSON 持久化、显式错误回退与发布门禁。 :contentReference[oaicite:0]{index=0}  
+状态机实现基线已经固定为：单线程、单事件队列、唯一合法状态集合、固定事件来源矩阵、`STATS` 入口固定、`INFERENCING/RECORDING` 不可中断、`DISPLAY` 在采样模式下不可跳过记录。 
+
+---
+
+# 1. 适用范围与优先级
+
+## 1.1 适用范围
+
+本文件适用于以下工作：
+
+- 建立项目目录结构
+- 创建代码文件骨架
+- 定义核心类与接口
+- 落实状态机代码组织
+- 确定 Adapter / Service / Repository / Renderer 的边界
+- 约束模块依赖方向
+- 约束错误处理、超时处理、输入映射、统计分页等结构性实现方式
+
+## 1.2 不适用范围
+
+本文件不处理以下问题：
+
+- UI 视觉风格细节
+- 模型训练方法
+- 数据集构建过程
+- 具体测试用例内容
+- 树莓派部署脚本细节
+- 性能优化具体技巧
+
+这些问题可能在后续阶段出现，但不属于本文件的结构冻结范围。
+
+## 1.3 优先级规则
+
+本文件的直接依据只有两份：
+
+1. **《架构设计_v2.1》**：用于约束分层、模块职责、适配器隔离、配置与持久化结构、UI 原则、启动链路、发布门禁、目录框架。 
+2. **《状态机详细设计 v2.0》**：用于约束状态集合、事件集合、事件来源矩阵、单线程 FIFO 事件队列、StateContext 字段、handler 职责、超时与错误恢复、`RETRY_PRESS` 映射规则。 
+
+处理规则如下：
+
+- **代码结构设计的直接落地**：优先参考《状态机详细设计 v2.0》
+- **代码结构的总体边界与分层职责**：受《架构设计_v2.1》约束
+- **若两者明显冲突**：必须停止自行决策并上报，不得私自折中
+
+---
+
+# 2. 设计目标
+
+本文件必须达到以下目标：
+
+## 2.1 可直接编码
+
+开发者打开本文件后，应能直接开始创建目录、文件、类、接口，而不需要再补充“结构层面的关键决策”。状态机文档已经明确要求状态机设计应达到“开发者无需再补设计决策即可实现 `StateMachine`、`StateContext`、事件队列、状态处理器与转移表”的程度；本文件必须在代码结构层面达到同等级的可编码性。 :contentReference[oaicite:4]{index=4}
+
+## 2.2 无歧义
+
+代码结构中最容易出问题的，不是“缺文件”，而是边界不清。  
+因此本文件必须把以下内容写死：
+
+- 哪些模块负责流程控制
+- 哪些模块负责领域规则
+- 哪些模块只负责接触硬件与文件
+- 哪些模块只负责渲染
+- 状态迁移由谁决定
+- 错误恢复由谁解释
+- `RETRY_PRESS` 从哪里来
+- `TIMEOUT` 由谁产生、由谁解释
+- `StateContext` 与持久化数据的边界在哪里
+
+## 2.3 与两份基线完全一致
+
+代码结构不能为了“写起来方便”去偏离架构基线与状态机基线。  
+例如：
+
+- 不允许引入第二控制流中心
+- 不允许让 UI 决策流程
+- 不允许让 Adapter 改状态
+- 不允许把 `DISPLAY` 与 `RECORDING` 合并成一个结构层面的单元
+- 不允许开放 `STATS` 的第二入口
+- 不允许把 `RETRY_PRESS` 暴露成物理按键
+
+这些都已经在两份基线中被冻结。 
+
+## 2.4 可维护、低复杂度、适合个人开发
+
+架构文档明确给出的目标是：单线程、低复杂度、可维护、可验证。   
+因此本文件不会引入以下额外复杂度：
+
+- IoC 框架
+- 消息总线
+- 多线程任务系统
+- 数据库
+- 插件系统
+- 过度抽象的跨层协议体系
+
+---
+
+# 3. 设计总原则（最终冻结）
+
+---
+
+## 3.1 唯一控制流原则
+
+系统唯一合法流程控制中心是：
+
+```text
+StateMachine
+````
+
+所有流程推进必须通过状态机完成。
+禁止以下行为：
+
+* UI 直接改状态
+* Adapter 直接改状态
+* Service 绕过状态机跳流程
+* StorageAdapter 写完数据后自行决定返回哪个状态
+* Renderer 根据页面情况自行跳页
+
+架构文档已明确“状态机唯一控制流”；状态机文档又进一步要求“所有事件都必须进入 EventQueue，禁止任何模块绕过队列直接改状态”。
+
+---
+
+## 3.2 单线程事件驱动原则
+
+运行模型固定为：
+
+```text
+单进程
+单线程
+单事件队列（FIFO）
+串行消费事件
+```
+
+唯一合法的高层处理模型为：
+
+```text
+EventQueue (FIFO)
+
+while running:
+    event = dequeue()
+    handle_event(event)
+```
+
+禁止：
+
+* 多线程并发消费事件
+* 递归处理下一事件
+* 一个模块内部私建第二事件循环
+* 并行状态处理器
+
+这些都是状态机文档已经冻结的执行模型。 
+
+---
+
+## 3.3 分层架构原则
+
+固定结构为：
+
+```text
+controller
+application
+domain
+infrastructure
+presentation
+```
+
+其中真正的四层架构是：
+
+```text
+Presentation Layer
+↓
+Application Layer
+↓
+Domain Layer
+↓
+Infrastructure Layer
+```
+
+`controller` 是启动装配层，不参与业务分层竞争。架构文档已经给出这一分层结构，并给出了各层职责。 
+
+---
+
+## 3.4 UI 纯渲染原则（硬规则一，全文联动）
+
+### 冻结规则
+
+> Presentation 层优先只消费 `StateContext` 与 `ViewModel`；
+> 如需直接读取 Domain 对象，仅限只读展示型对象，且不得在页面层做领域规则判断。
+
+### 含义展开
+
+1. UI 允许读取：
+
+   * 当前 `State`
+   * 当前 `StateContext`
+   * 已转换好的 `ViewModel`
+   * 少量只读领域对象（仅展示，不做规则判断）
+
+2. UI 不允许做：
+
+   * 置信度阈值判定
+   * 是否记录的判定
+   * 是否进入下一状态的判定
+   * JSON 数据结构解释与去重逻辑判断
+   * 错误恢复路径判定
+
+3. UI 不允许直接访问：
+
+   * `StorageAdapter`
+   * `InferenceAdapter`
+   * `SamplingRecorder`
+   * `RecognitionService`
+
+架构文档已明确 `UIRenderer` 由 `State + StateContext` 驱动，UI 不持有独立业务状态，不直接访问 `StorageAdapter / InferenceAdapter`。 
+状态机文档也要求 UI 不得产生内部事件，不得成为流程决策中心。 
+
+---
+
+## 3.5 Adapter 隔离原则
+
+所有外部依赖必须隔离在 `infrastructure` 中。
+至少包括：
+
+* 相机
+* 输入
+* 推理
+* 存储
+* 配置加载
+
+这来自架构文档对适配器隔离的明确要求。 
+
+### 强制后果
+
+* `domain` 不得 import `gpio_button_adapter.py`
+* `presentation` 不得 import `json_storage_adapter.py`
+* `application` 只能通过抽象边界调用适配器，不得直接写硬件细节
+
+---
+
+## 3.6 Adapter 不改状态原则
+
+Adapter 只能：
+
+* 返回数据
+* 抛出异常
+* 产生规定范围内的事件来源结果
+
+Adapter 不能：
+
+* 修改 `current_state`
+* 直接调用 `TransitionEngine`
+* 直接调用 `Renderer` 要求切页
+
+状态机文档明确规定：Service/Adapter 不得改状态，只能发事件。 
+
+---
+
+## 3.7 错误统一策略原则
+
+所有错误都必须通过统一结构处理：
+
+* `ErrorType`
+* `AppError`
+* `ErrorPolicy`
+
+禁止：
+
+* 用字符串拼装错误类型到处传播
+* 各 handler 自己私定“是否可重试”
+* UI 自己决定错误后跳去哪里
+* StorageAdapter 自己决定发生错误时改状态
+
+架构文档与状态机文档都已把错误恢复写成显式规则，不能散乱实现。
+
+---
+
+## 3.8 状态迁移控制原则（硬规则二，全文联动）
+
+### 冻结规则
+
+> `TransitionEngine` 决定并执行状态迁移；
+> `StateHandler` 不得直接修改 `current_state`。
+
+### 含义展开
+
+1. `StateHandler` 的职责是：
+
+   * 执行状态内动作
+   * 响应事件
+   * 填充或清理上下文
+   * 在需要时入队内部事件
+
+2. `TransitionEngine` 的职责是：
+
+   * 校验事件是否合法
+   * 判断守卫是否满足
+   * 统一执行 `on_exit`
+   * 真正更新 `current_state`
+   * 执行目标状态 `on_enter`
+
+3. 不允许的写法：
+
+   * 在 `handler.handle()` 里直接 `self.state_machine.current_state = ...`
+   * 在 `handler.on_enter()` 里递归调用状态切换
+   * 让 UI 或 Service 代替 `TransitionEngine` 决定迁移
+
+状态机文档已经给出唯一合法迁移顺序，因此代码结构必须有一个明确承载者。 
+
+---
+
+## 3.9 错误恢复语义规则（硬规则三，全文联动）
+
+### 冻结规则
+
+> `ErrorPolicy.recovery_target()` 返回 `None` 表示：
+> **保持当前状态，并以降级方式渲染 UI。**
+
+### 含义展开
+
+这条规则主要用于处理并非“跳转到别的状态”就能描述的问题，例如：
+
+* `DataError` 在 `STATS` 中发生时：
+
+  * 不应跳去 `ERROR`
+  * 不应跳回 `REGION_SELECT`
+  * 应停留在 `STATS`
+  * 用错误占位和空态渲染
+
+因此：
+
+* `State` 的改变不是错误恢复的唯一结果
+* “停留当前状态 + 降级渲染” 是一种合法恢复方式
+
+状态机文档对 `DataError` 的处理就是这一模式。 
+
+---
+
+## 3.10 所有事件必须入队原则
+
+所有事件都必须进入 `EventQueue`，包括：
+
+* 外部输入事件
+* 内部流程事件
+* 超时事件
+* 系统级错误事件
+
+禁止：
+
+* UI 直接调用 `handle_event(event)`
+* `on_enter()` 内同步递归处理下一事件
+* Adapter 直接调用状态迁移
+* 跳过队列直接推进流程
+
+状态机文档对此是硬规则。 
+
+---
+
+## 3.11 `RETRY_PRESS` 来源固定原则
+
+### 冻结规则
+
+`RETRY_PRESS` 不是物理按键事件。
+它只能在 `ERROR` 页面中由 `CONFIRM_PRESS` 映射而来。
+
+### 结构后果
+
+* `InputAdapter` 不得直接产生 `RETRY_PRESS`
+* 必须存在 `InputMapper` 或等价应用层映射逻辑
+* `ERROR` 页的确认输入与 सामान्य确认输入不能混为一谈
+
+状态机文档明确给出了来源矩阵与 `CONFIRM_PRESS -> RETRY_PRESS` 的映射。
+
+---
+
+## 3.12 `TIMEOUT` 中立事件原则
+
+### 冻结规则
+
+`TimeoutScheduler` 只能产生 `TIMEOUT`。
+它不解释业务含义，不直接产生 `INFER_FAIL / RECORD_FAIL`。
+
+### 结构后果
+
+* 超时调度器是中性调度器
+* `TIMEOUT` 的业务解释交给当前状态
+* `INFERENCING` 状态收到 `TIMEOUT` 时再转换为 `INFER_FAIL`
+* `RECORDING` 状态收到 `TIMEOUT` 时再转换为 `RECORD_FAIL`
+
+状态机文档对此写得非常清楚。
+
+---
+
+# 4. 目录结构（最终冻结）
+
+下面给出本项目最终冻结的目录结构。
+这是可以直接按此创建目录与文件的版本。
+
+```text
+app/
+  main.py
+
+  controller/
+    app_controller.py
+
+  application/
+    __init__.py
+    events.py
+    states.py
+    state_context.py
+    event_queue.py
+    transition_engine.py
+    guard_evaluator.py
+    timeout_scheduler.py
+    error_policy.py
+    input_mapper.py
+    state_machine.py
+
+    state_handlers/
+      __init__.py
+      base_handler.py
+      booting_handler.py
+      home_handler.py
+      map_select_handler.py
+      region_select_handler.py
+      preview_handler.py
+      captured_handler.py
+      inferencing_handler.py
+      display_handler.py
+      recording_handler.py
+      stats_handler.py
+      error_handler.py
+
+  domain/
+    __init__.py
+    models.py
+    errors.py
+    constants.py
+    rules.py
+    recognition_service.py
+    sampling_recorder.py
+    statistics_query_service.py
+    release_gate_service.py
+
+  infrastructure/
+    __init__.py
+
+    camera/
+      __init__.py
+      base_camera_adapter.py
+      picamera2_adapter.py
+
+    input/
+      __init__.py
+      base_input_adapter.py
+      gpio_button_adapter.py
+      keyboard_adapter.py
+
+    inference/
+      __init__.py
+      base_inference_adapter.py
+      tflite_adapter.py
+
+    storage/
+      __init__.py
+      base_storage_adapter.py
+      json_storage_adapter.py
+
+    config/
+      __init__.py
+      system_config_repository.py
+      sampling_config_repository.py
+      label_repository.py
+      model_manifest_repository.py
+
+    logging/
+      __init__.py
+      logger.py
+
+  presentation/
+    __init__.py
+    renderer.py
+    view_models.py
+
+    pages/
+      __init__.py
+      booting_page.py
+      home_page.py
+      map_page.py
+      region_page.py
+      preview_page.py
+      inferencing_overlay.py
+      display_page.py
+      stats_page.py
+      error_page.py
+
+config/
+  system_config.json
+  labels.json
+  sampling_config.json
+  model_manifest.json
+
+data/
+  regions/
+
+logs/
+
+tests/
+  # 非本阶段冻结内容，仅预留目录
+```
+
+### 说明
+
+1. 该目录结构是在架构文档目录建议基础上做的必要细化，而不是另起炉灶。架构文档已建议最小目录结构为 `main/controller/application/domain/infrastructure/presentation/config/data/logs`。 
+2. 细化部分主要来自状态机文档要求“可直接实现 `StateMachine`、`StateContext`、事件队列、状态处理器与转移表”。 
+3. `tests/` 在本阶段只声明存在，不纳入本文件的冻结设计范围。
+
+---
+
+# 5. 依赖方向（必须冻结）
+
+目录只是表象，依赖方向才是真正的结构。
+下面的依赖方向必须严格执行。
+
+## 5.1 合法依赖方向
+
+```text
+controller
+  ↓
+application
+  ↓
+domain
+  ↓
+infrastructure
+
+presentation ← application
+presentation ← domain（只读展示型对象或 ViewModel 转换后对象）
+```
+
+### 逐项解释
+
+#### controller
+
+* 可以依赖所有层
+* 因为它负责装配与启动
+* 但它不承载业务规则
+
+#### application
+
+* 可以依赖 `domain` 和 `infrastructure`
+* 因为状态机需要调用领域规则与外部适配器
+* 也可以驱动 `presentation` 渲染，但不应被 `presentation` 反向控制
+
+#### domain
+
+* 不得依赖 `application`
+* 不得依赖 `presentation`
+* 不得知道硬件与文件读写实现细节
+
+#### infrastructure
+
+* 只提供外部依赖实现
+* 不得依赖 `presentation`
+* 不得成为流程决策层
+
+#### presentation
+
+* 可以消费 `State + StateContext + ViewModel`
+* 可以只读消费少量领域对象
+* 不得回头控制 `application` 的状态流
+
+## 5.2 明确禁止的反向依赖
+
+以下依赖一律不允许：
+
+* `domain -> application`
+* `domain -> presentation`
+* `domain -> gpio / camera / tflite / json storage 实现`
+* `presentation -> storage adapter`
+* `presentation -> inference adapter`
+* `adapter -> state_machine`
+* `service -> renderer`
+
+如果出现这些依赖，说明结构已经偏离基线。
+
+---
+
+# 6. 顶层运行闭环
+
+本项目完整的结构运行闭环应为：
+
+```text
+RawInput
+  → InputMapper
+    → Event
+      → EventQueue
+        → StateMachine
+          → TransitionEngine
+            → StateHandler
+              → Domain Service / Repository / Adapter
+                → 更新 StateContext
+                  → Renderer 渲染
+```
+
+这条闭环非常关键，因为它说明了：
+
+* 输入不会直接驱动页面
+* UI 不会直接驱动业务
+* Adapter 不会直接驱动状态
+* 所有流程最终仍回到状态机中心
+
+---
+
+# 7. controller 层详细设计
+
+---
+
+## 7.1 文件：`app/main.py`
+
+### 职责
+
+* 进程入口
+* 创建 `AppController`
+* 启动程序
+* 捕获最外层无法恢复的退出逻辑
+
+### 不负责
+
+* 不做依赖装配细节
+* 不做业务判断
+* 不做状态机处理
+* 不直接渲染页面
+* 不直接读写配置与数据文件
+
+### 建议结构
+
+```python
+def main() -> None:
+    controller = AppController()
+    controller.bootstrap()
+    controller.run()
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## 7.2 文件：`controller/app_controller.py`
+
+### 角色定位
+
+`AppController` 是启动与装配中心。
+架构文档已明确其职责：系统启动入口、初始化依赖、装配模块、启动主循环、管理生命周期，且不做业务判断。 
+
+### 核心职责
+
+1. 创建并持有全局运行对象
+2. 组装：
+
+   * `EventQueue`
+   * `InputMapper`
+   * `TimeoutScheduler`
+   * `TransitionEngine`
+   * `StateMachine`
+   * 各 `StateHandler`
+   * 各 `Adapter`
+   * 各 `Repository`
+   * 各 `Domain Service`
+   * `UIRenderer`
+3. 建立依赖注入关系
+4. 启动主循环
+5. 停机时释放资源
+
+### 不负责
+
+* 不决定业务流
+* 不解释错误恢复规则
+* 不替代 `TransitionEngine`
+* 不直接做状态迁移
+* 不直接决定页面跳转
+
+### 建议接口
+
+```python
+class AppController:
+    def __init__(self) -> None: ...
+    def bootstrap(self) -> None: ...
+    def build_runtime(self) -> None: ...
+    def run(self) -> None: ...
+    def shutdown(self) -> None: ...
+```
+
+### 设计说明
+
+* `bootstrap()` 用于创建依赖并完成装配
+* `run()` 用于进入主循环
+* `shutdown()` 用于关闭输入、相机等资源
+
+`AppController` 不应被写成“无所不做”的上帝类。
+如果未来你发现 `AppController` 开始堆积业务 if/else，说明结构已经坏了。
+
+---
+
+# 8. application 层详细设计
+
+application 层是本项目代码结构的核心。
+它承载的是“系统如何跑”，而不是“系统识别植物的规则是什么”。
+这一层对应架构文档中的：
+
+* 状态机
+* 事件分发
+* 用例编排
+* 状态上下文维护
+* 错误回退 
+
+---
+
+## 8.1 文件：`application/states.py`
+
+### 职责
+
+定义唯一合法状态集合。
+
+### 必要性
+
+状态机文档已冻结唯一合法状态集合，因此状态必须独立放在一个公共文件中，避免散落在 `state_machine.py`、handler 或页面文件里。 
+
+### 定义
+
+```python
+from enum import Enum, auto
+
+class State(Enum):
+    BOOTING = auto()
+    HOME = auto()
+    MAP_SELECT = auto()
+    REGION_SELECT = auto()
+    PREVIEW = auto()
+    CAPTURED = auto()
+    INFERENCING = auto()
+    DISPLAY = auto()
+    RECORDING = auto()
+    STATS = auto()
+    ERROR = auto()
+```
+
+### 强制规则
+
+* 不允许新增架构外业务状态
+* 不允许用 UI 页面名替代状态名
+* 不允许把 `mode` 当成状态
+
+---
+
+## 8.2 文件：`application/events.py`
+
+### 职责
+
+定义全部事件枚举。
+
+### 分类
+
+事件分为：
+
+* 外部输入事件
+* 内部流程事件
+* 超时事件
+* 系统级错误事件
+
+### 定义
+
+```python
+from enum import Enum, auto
+
+class Event(Enum):
+    CONFIRM_PRESS = auto()
+    NAV_PRESS = auto()
+    BACK_LONG_PRESS = auto()
+    NAV_LONG_PRESS = auto()
+    RETRY_PRESS = auto()
+
+    BOOT_OK = auto()
+    BOOT_FAIL = auto()
+    CAPTURE_OK = auto()
+    CAPTURE_FAIL = auto()
+    INFER_OK = auto()
+    INFER_FAIL = auto()
+    RECORD_OK = auto()
+    RECORD_FAIL = auto()
+
+    TIMEOUT = auto()
+    SYSTEM_ERROR = auto()
+```
+
+### 事件来源约束
+
+根据状态机文档的来源矩阵，必须满足： 
+
+* `InputAdapter` 仅能产生：
+
+  * `CONFIRM_PRESS`
+  * `NAV_PRESS`
+  * `BACK_LONG_PRESS`
+  * `NAV_LONG_PRESS`
+
+* `ErrorPage 输入映射` 才能产生：
+
+  * `RETRY_PRESS`
+
+* `Boot 初始化逻辑` 才能产生：
+
+  * `BOOT_OK`
+  * `BOOT_FAIL`
+
+* `Camera/抓帧流程` 才能产生：
+
+  * `CAPTURE_OK`
+  * `CAPTURE_FAIL`
+
+* `Inference 流程` 才能产生：
+
+  * `INFER_OK`
+  * `INFER_FAIL`
+
+* `Recording 流程` 才能产生：
+
+  * `RECORD_OK`
+  * `RECORD_FAIL`
+
+* `TimeoutScheduler` 才能产生：
+
+  * `TIMEOUT`
+
+* `StateMachine / 全局异常捕获` 才能产生：
+
+  * `SYSTEM_ERROR`
+
+### 结构后果
+
+只要有任何一个模块企图越过这个矩阵，就视为违规实现。
+
+---
+
+## 8.3 文件：`application/state_context.py`
+
+### 职责
+
+定义状态机运行时上下文。
+
+### 定位
+
+`StateContext` 是运行时对象，不是持久化对象，不是 UI 内部状态，不是领域模型。
+架构文档给了简版；状态机文档给了最小必要字段最终版。代码落地必须采用状态机文档这版。
+
+### 定义
+
+```python
+from dataclasses import dataclass
+from domain.models import RecognitionResult, RegionStatsFile
+from domain.errors import AppError
+
+@dataclass
+class StateContext:
+    mode: str | None = None
+    selected_home_option: str = "normal"
+
+    selected_map_id: str | None = None
+    selected_map_index: int | None = None
+
+    selected_region_id: str | None = None
+    selected_region_index: int | None = None
+
+    selected_stats_page_index: int = 0
+
+    last_captured_frame: object | None = None
+    last_recognition_result: RecognitionResult | None = None
+
+    last_error: AppError | None = None
+    error_is_retryable: bool = False
+
+    display_deadline: float | None = None
+    infer_deadline: float | None = None
+    record_deadline: float | None = None
+
+    current_stats_snapshot: RegionStatsFile | None = None
+```
+
+### 字段解释
+
+#### `mode`
+
+* 合法值：`normal / sampling`
+* 不是状态
+* 用于区分普通模式与采样模式在 `PREVIEW / DISPLAY / RECORDING` 等状态中的行为差异
+
+#### `selected_home_option`
+
+* 首页高亮项
+* 进入 `HOME` 时应重置为 `normal`
+
+#### `selected_map_id / selected_map_index`
+
+* 当前地图选择
+* 用于 `MAP_SELECT -> REGION_SELECT`
+
+#### `selected_region_id / selected_region_index`
+
+* 当前区域选择
+* 用于采样记录与统计页
+
+#### `selected_stats_page_index`
+
+* 统计页当前页码
+* 每次进入 `STATS` 应强制归零
+
+#### `last_captured_frame`
+
+* 最近一次冻结的识别帧
+* `CAPTURED / INFERENCING` 必需
+
+#### `last_recognition_result`
+
+* 最近一次识别结果
+* `DISPLAY / RECORDING` 必需
+
+#### `last_error`
+
+* 当前或最近一次错误
+* `ERROR` 页展示与恢复策略依据
+
+#### `error_is_retryable`
+
+* 当前错误是否允许重试
+* 不应由 UI 或 handler 临时推断
+
+#### `display_deadline / infer_deadline / record_deadline`
+
+* 当前超时状态的调度上下文
+* 运行期控制辅助字段，不可持久化
+
+#### `current_stats_snapshot`
+
+* 当前区域统计快照
+* 供 `STATS` 渲染使用
+
+### 明确边界
+
+* `StateContext` 不落盘
+* `StateContext` 不应被 UI 私有持有和复制成第二套状态
+* `StateContext` 不能替代 `RegionStatsFile`
+
+---
+
+## 8.4 文件：`application/event_queue.py`
+
+### 职责
+
+提供单线程 FIFO 事件队列。
+
+### 建议接口
+
+```python
+class EventQueue:
+    def enqueue(self, event: Event) -> None: ...
+    def dequeue(self) -> Event: ...
+    def is_empty(self) -> bool: ...
+    def clear(self) -> None: ...
+```
+
+### 规则
+
+* 只负责入队/出队
+* 不解释事件
+* 不做状态切换
+* 不做日志之外的业务动作
+
+### 禁止事项
+
+* 在队列内部直接调用 handler
+* 在队列内部判断守卫
+* 在队列内部切状态
+
+---
+
+## 8.5 文件：`application/input_mapper.py`
+
+### 职责
+
+负责从原始物理输入到状态机事件的归一化映射。
+
+### 为什么必须存在
+
+因为 `RETRY_PRESS` 不能由输入层直接产生，但又必须在 `ERROR` 中由 `CONFIRM_PRESS` 映射而来。
+如果没有这一层，输入来源约束一定会被破坏。
+
+### 建议接口
+
+```python
+from application.states import State
+from application.events import Event
+from infrastructure.input.base_input_adapter import RawInput
+
+class InputMapper:
+    def map_raw_input(self, raw_input: RawInput, current_state: State) -> Event | None: ...
+```
+
+### 必须支持的映射
+
+#### 常规映射
+
+* `RawInput.CONFIRM -> Event.CONFIRM_PRESS`
+* `RawInput.NAV -> Event.NAV_PRESS`
+* `RawInput.BACK_LONG -> Event.BACK_LONG_PRESS`
+* `RawInput.NAV_LONG -> Event.NAV_LONG_PRESS`
+
+#### 特殊映射
+
+* 当 `current_state == State.ERROR` 且 `raw_input == RawInput.CONFIRM` 时：
+
+  * 返回 `Event.RETRY_PRESS`
+
+### 不允许
+
+* 直接生成 `INFER_OK`
+* 直接生成 `BOOT_FAIL`
+* 直接切状态
+* 在这里执行重试逻辑本身
+
+---
+
+## 8.6 文件：`application/error_policy.py`
+
+### 职责
+
+统一错误分类、重试能力判断、恢复目标表达。
+
+### 为什么必须存在
+
+架构文档和状态机文档都已给出错误恢复矩阵；如果不集中表达，错误恢复逻辑会在多个 handler 中分裂。
+
+### 建议接口
+
+```python
+from application.states import State
+from domain.errors import AppError
+
+class ErrorPolicy:
+    def classify(self, exc: Exception) -> AppError: ...
+    def is_retryable(self, error: AppError) -> bool: ...
+    def recovery_target(self, error: AppError) -> State | None: ...
+```
+
+### 关键规则
+
+#### `recovery_target()` 语义
+
+* 返回某个 `State`：表示跳转到该状态
+* 返回 `None`：表示**保持当前状态并降级渲染**
+
+#### 典型映射
+
+* 启动期 `CameraError -> ERROR`
+* `ModelError -> ERROR`
+* `LabelError -> ERROR`
+* `ConfigError -> ERROR`
+* `ReleaseGateError -> ERROR`
+* `InferenceError -> PREVIEW`
+* `StorageError -> PREVIEW`
+* `DataError -> None`（保持 `STATS`，显示错误占位）
+* `SYSTEM_ERROR -> ERROR`
+
+#### 重试矩阵
+
+根据状态机文档： 
+
+* 可重试：
+
+  * 启动期 `CameraError`
+  * `ModelError`
+  * `LabelError`
+  * `ConfigError`
+
+* 不可重试：
+
+  * `ReleaseGateError`
+  * `SYSTEM_ERROR`
+
+### 禁止事项
+
+* UI 根据 message 字符串自己判断是否可重试
+* 某个 handler 临时自己决定“不如让它跳 HOME”
+* `ErrorPolicy` 直接改状态
+
+---
+
+## 8.7 文件：`application/guard_evaluator.py`
+
+### 职责
+
+集中表达守卫条件判断。
+
+### 原因
+
+状态机文档列出了大量守卫条件，不适合散在 handler 里，否则会导致同一条件多处实现、口径不一。 
+
+### 建议接口
+
+```python
+class GuardEvaluator:
+    def is_home_normal_selected(self, ctx: StateContext) -> bool: ...
+    def is_home_sampling_selected(self, ctx: StateContext) -> bool: ...
+    def has_available_maps(self) -> bool: ...
+    def is_recognized(self, ctx: StateContext) -> bool: ...
+    def is_retryable(self, ctx: StateContext) -> bool: ...
+    def is_normal_mode(self, ctx: StateContext) -> bool: ...
+    def is_sampling_mode(self, ctx: StateContext) -> bool: ...
+```
+
+### 规则
+
+* 守卫失败默认不抛异常
+* 默认行为是忽略并停留当前状态
+* 只有被明确归类为系统错误的情况，才上升为 `SYSTEM_ERROR` 或 `BOOT_FAIL`
+
+---
+
+## 8.8 文件：`application/timeout_scheduler.py`
+
+### 职责
+
+注册与取消状态超时；超时后只入队 `TIMEOUT`。
+
+### 建议接口
+
+```python
+class TimeoutScheduler:
+    def schedule(self, state: State, seconds: float) -> None: ...
+    def cancel(self, state: State) -> None: ...
+    def cancel_all(self) -> None: ...
+```
+
+### 状态支持
+
+根据状态机文档，业务超时只适用于： 
+
+* `INFERENCING`：3 秒
+* `DISPLAY`：5 秒
+* `RECORDING`：1 秒
+
+### 明确要求
+
+* 只能产生 `TIMEOUT`
+* 不解释业务
+* 不发 `INFER_FAIL`
+* 不发 `RECORD_FAIL`
+* 不改状态
+
+---
+
+## 8.9 文件：`application/transition_engine.py`
+
+### 职责
+
+统一执行状态迁移过程。
+
+### 为什么必须存在
+
+状态机文档已经冻结了迁移执行顺序，必须有明确结构承载者。 
+
+### 唯一合法顺序
+
+```text
+1. validate_event(current_state, event)
+2. evaluate_guard(current_state, event, context)
+3. current_state.on_exit(context)
+4. execute_transition_action(current_state, event, context)
+5. update_state(next_state)
+6. next_state.on_enter(context)
+7. enqueue_internal_event_if_needed()
+```
+
+### 建议接口
+
+```python
+class TransitionEngine:
+    def handle(self, state: State, event: Event, ctx: StateContext) -> None: ...
+    def validate_event(self, state: State, event: Event) -> None: ...
+    def evaluate_guard(self, state: State, event: Event, ctx: StateContext) -> bool: ...
+    def execute_transition(self, state: State, event: Event, ctx: StateContext) -> None: ...
+```
+
+### 硬规则联动
+
+再次强调：
+
+> `TransitionEngine` 决定并执行迁移；
+> `StateHandler` 不得直接修改 `current_state`。
+
+### 不允许
+
+* 在 `StateHandler.handle()` 里直接改 `current_state`
+* 在 `on_enter()` 里同步递归处理下一事件
+* 让 UI 触发迁移
+
+---
+
+## 8.10 文件：`application/state_machine.py`
+
+### 职责
+
+状态机主控类，唯一状态持有者。
+
+### 建议接口
+
+```python
+class StateMachine:
+    def __init__(...) -> None: ...
+    def start(self) -> None: ...
+    def enqueue(self, event: Event) -> None: ...
+    def process_next_event(self) -> None: ...
+    def run_once(self) -> None: ...
+    def current_state(self) -> State: ...
+    def context(self) -> StateContext: ...
+```
+
+### 核心职责
+
+1. 持有当前状态
+2. 持有 `StateContext`
+3. 管理事件入队与出队
+4. 调用 `TransitionEngine`
+5. 记录状态迁移日志
+6. 把非法内部事件升级为 `SYSTEM_ERROR`
+
+### 关键约束
+
+* 同一时刻只允许一个状态活跃
+* 所有页面切换必须由状态切换触发
+* 非法事件必须被显式忽略或提升为错误
+
+这与架构文档、状态机文档一致。
+
+### 运行闭环建议
+
+```python
+while running:
+    raw_inputs = input_adapter.poll_raw_inputs()
+    for raw in raw_inputs:
+        event = input_mapper.map_raw_input(raw, current_state)
+        if event is not None:
+            queue.enqueue(event)
+
+    if not queue.is_empty():
+        event = queue.dequeue()
+        transition_engine.handle(current_state, event, context)
+
+    renderer.render(current_state, context)
+```
+
+这只是骨架表达，目的是明确顺序，不是强制具体代码风格。
+
+---
+
+## 8.11 目录：`application/state_handlers/`
+
+状态机文档要求每个状态都要有明确的：
+
+* 进入动作
+* 退出动作
+* 可接收事件
+* 非法事件处理
+* 超时规则
+* 数据上下文要求 
+
+因此，状态必须拆成独立 handler，而不是挤进一个大 `if/elif` 文件。
+
+---
+
+### 8.11.1 文件：`base_handler.py`
+
+定义所有 handler 的统一抽象接口。
+
+```python
+class BaseStateHandler(Protocol):
+    state: State
+
+    def allowed_events(self) -> set[Event]: ...
+    def on_enter(self, ctx: StateContext) -> None: ...
+    def on_exit(self, ctx: StateContext) -> None: ...
+    def handle(self, event: Event, ctx: StateContext) -> None: ...
+```
+
+### 说明
+
+* `allowed_events()` 用于合法性校验
+* `on_enter()` / `on_exit()` 只做当前状态职责内的动作
+* `handle()` 响应事件，但**不直接修改 `current_state`**
+
+---
+
+### 8.11.2 文件：`booting_handler.py`
+
+### 职责
+
+按照状态机文档的固定顺序执行启动流程： 
+
+1. 加载 `system_config`
+2. 加载 `labels`
+3. 加载 `sampling_config`
+4. 校验 map / region 规则
+5. 加载 `model_manifest`
+6. 初始化输入适配器
+7. 初始化相机
+8. 加载模型
+9. 执行 `ReleaseGateService`
+10. 成功则入队 `BOOT_OK`
+11. 失败则填充 `last_error`、`error_is_retryable` 并入队 `BOOT_FAIL`
+
+### 可接收事件
+
+* `BOOT_OK`
+* `BOOT_FAIL`
+
+### 非法输入
+
+* 所有用户外部输入都应忽略
+
+### 不负责
+
+* 不自己切去 `HOME`
+* 不自己切去 `ERROR`
+* 不自己解释最终恢复路径
+
+这些由 `TransitionEngine` 处理。
+
+---
+
+### 8.11.3 文件：`home_handler.py`
+
+### 职责
+
+* 渲染首页
+* 强制 `selected_home_option = normal`
+* 响应 `NAV_PRESS`
+* 响应 `CONFIRM_PRESS`
+* 清理上一轮识别流程残留上下文
+
+### 规则
+
+* `NAV_PRESS` 在 `normal / sampling` 之间翻转
+* `CONFIRM_PRESS`：
+
+  * normal -> `PREVIEW`
+  * sampling -> `MAP_SELECT`
+
+### 不负责
+
+* 不渲染采样配置详情
+* 不触发记录
+* 不解释统计逻辑
+
+---
+
+### 8.11.4 文件：`map_select_handler.py`
+
+### 职责
+
+* 加载地图列表
+* 默认高亮第一项
+* 处理空地图显示
+* 响应 `NAV_PRESS / CONFIRM_PRESS / BACK_LONG_PRESS`
+
+### 规则
+
+* 有地图：循环切换
+* 无地图：保持空态并提示
+* `BACK_LONG_PRESS -> HOME`
+
+### 特别说明
+
+* 空地图配置是合法降级启动场景，但采样模式入口应显示“无可用地图”。这与架构文档一致。 
+
+---
+
+### 8.11.5 文件：`region_select_handler.py`
+
+### 职责
+
+* 加载所选 map 的 region 列表
+* 默认高亮第一项
+* 响应 `NAV_PRESS / CONFIRM_PRESS / BACK_LONG_PRESS / NAV_LONG_PRESS`
+
+### 规则
+
+* `NAV_PRESS` 循环切换区域
+* `CONFIRM_PRESS -> PREVIEW`
+* `BACK_LONG_PRESS -> MAP_SELECT`
+* `NAV_LONG_PRESS -> STATS`
+
+### 硬规则
+
+`STATS` 的唯一入口必须是 `REGION_SELECT -> STATS`。
+架构文档与状态机文档都已冻结这一点。
+
+---
+
+### 8.11.6 文件：`preview_handler.py`
+
+### 职责
+
+* 启动或保持相机预览
+* 渲染取景页
+* 显示准星
+* 接收 `CONFIRM_PRESS`
+* 处理 `BACK_LONG_PRESS`
+
+### 规则
+
+* `CONFIRM_PRESS -> CAPTURED`
+* `BACK_LONG_PRESS`
+
+  * normal -> `HOME`
+  * sampling -> `REGION_SELECT`
+
+### 关键约束
+
+* 不重复初始化相机链路
+* 保持预览链路以减少延迟
+* 不接收 `NAV_PRESS`
+
+---
+
+### 8.11.7 文件：`captured_handler.py`
+
+### 定位
+
+纯逻辑中间态，不对应独立交互页面。状态机文档已明确 `CAPTURED` 不应停留。 
+
+### 职责
+
+* 校验 `last_captured_frame`
+* 有效则入队 `CAPTURE_OK`
+* 无效则入队 `CAPTURE_FAIL`
+
+### 不负责
+
+* 不渲染独立页面
+* 不接收用户输入
+* 不直接进入 `INFERENCING`
+
+---
+
+### 8.11.8 文件：`inferencing_handler.py`
+
+### 职责
+
+* 注册 3 秒超时
+* 调用推理链路
+* 生成 `last_recognition_result`
+* 成功入队 `INFER_OK`
+* 失败入队 `INFER_FAIL`
+
+### 规则
+
+* 忽略所有用户输入
+* `TIMEOUT` 在本状态中解释为“推理失败”，再统一转换成 `INFER_FAIL`
+* 退出时清理 `infer_deadline`
+
+### 对应要求
+
+状态机文档已冻结 `INFERENCING > 3 秒 -> 失败处理`，且推理中不可中断。
+
+---
+
+### 8.11.9 文件：`display_handler.py`
+
+### 职责
+
+* 渲染识别结果
+* 注册 5 秒显示超时
+* 在普通模式允许返回
+* 在采样模式等待 `TIMEOUT` 分流
+
+### 规则
+
+#### 普通模式
+
+* `TIMEOUT -> PREVIEW`
+* `BACK_LONG_PRESS -> PREVIEW`
+
+#### 采样模式
+
+* 若 `is_recognized == true`：
+
+  * `TIMEOUT -> RECORDING`
+* 若 `is_recognized == false`：
+
+  * `TIMEOUT -> PREVIEW`
+
+### 硬规则
+
+采样模式下 `DISPLAY` 不允许用户通过返回跳过将要发生的 `RECORDING`。
+这是架构文档和状态机文档共同冻结的重点规则。
+
+---
+
+### 8.11.10 文件：`recording_handler.py`
+
+### 职责
+
+* 注册 1 秒超时
+* 调用 `SamplingRecorder.record()`
+* 成功入队 `RECORD_OK`
+* 失败入队 `RECORD_FAIL`
+
+### 规则
+
+* 只在采样模式进入
+* 忽略所有用户输入
+* 失败后按既定恢复规则回安全状态
+* 与 `DISPLAY` 保持独立状态，不得合并
+
+### 原因
+
+状态机文档明确 `RECORDING` 是独立状态，拥有独立超时、独立非法事件处理与独立恢复路径。 
+
+---
+
+### 8.11.11 文件：`stats_handler.py`
+
+### 职责
+
+* 加载当前区域统计快照
+* 强制 `selected_stats_page_index = 0`
+* 按固定规则排序
+* 支持分页翻页
+* 处理数据损坏的降级渲染
+
+### 规则
+
+* 每页固定显示 4 条
+* 排序建议按 `display_name` 升序
+* `NAV_PRESS` 翻页
+* `BACK_LONG_PRESS -> REGION_SELECT`
+* 数据损坏时：
+
+  * 停留 `STATS`
+  * 显示错误提示
+  * 渲染空态或占位
+
+### 硬规则联动
+
+这里必须落实：
+
+> `ErrorPolicy.recovery_target() == None`
+> 表示保持当前状态并降级渲染
+
+也就是说，`DataError` 在 `STATS` 中不是状态迁移，而是降级渲染。
+
+---
+
+### 8.11.12 文件：`error_handler.py`
+
+### 职责
+
+* 渲染错误页
+* 展示 `last_error.message`
+* 响应确认重试逻辑
+
+### 规则
+
+* `CONFIRM_PRESS` 在 `ERROR` 中映射为 `RETRY_PRESS`
+* `RETRY_PRESS` 的效果由 `ErrorPolicy` 与状态机规则共同决定
+
+### 重试矩阵
+
+根据状态机文档： 
+
+* 可重试：
+
+  * 启动期 `CameraError`
+  * `ModelError`
+  * `LabelError`
+  * `ConfigError`
+
+* 不可重试：
+
+  * `ReleaseGateError`
+  * `SYSTEM_ERROR`
+
+### 不负责
+
+* 不自己执行重试动作
+* 不自己决定重试成功后去哪里
+* 不自己切状态
+
+---
+
+# 9. domain 层详细设计
+
+domain 层负责“规则与语义”，不负责“怎么调 GPIO、怎么渲染页面、怎么跑事件循环”。
+架构文档已明确 Domain 层负责：识别结果语义、置信度判定、去重与计数规则、记录与统计模型、容量限制规则、发布门禁规则。 
+
+---
+
+## 9.1 文件：`domain/constants.py`
+
+### 职责
+
+集中存放稳定业务常量。
+
+### 建议内容
+
+```python
+STATS_PAGE_SIZE = 4
+MAX_REGION_SPECIES = 50
+MAX_PLANT_COUNT = 999
+MAX_JSON_SIZE_BYTES = 1_048_576
+```
+
+### 来源说明
+
+* `STATS_PAGE_SIZE = 4` 来自状态机文档的分页规则。 
+* `50 / 999 / 1MB` 来自架构文档中受控数据增长与容量限制。 
+
+### 规则
+
+* 不允许在业务代码里散落魔法数字
+* 这些常量不是 UI 常量，而是业务/数据规则常量
+
+---
+
+## 9.2 文件：`domain/errors.py`
+
+### 职责
+
+定义统一错误类型与错误对象。
+
+### 建议定义
+
+```python
+from enum import Enum, auto
+from dataclasses import dataclass
+
+class ErrorType(Enum):
+    CAMERA = auto()
+    MODEL = auto()
+    LABEL = auto()
+    CONFIG = auto()
+    RELEASE_GATE = auto()
+    INFERENCE = auto()
+    STORAGE = auto()
+    DATA = auto()
+    SYSTEM = auto()
+
+@dataclass
+class AppError:
+    error_type: ErrorType
+    message: str
+    retryable: bool
+```
+
+### 规则
+
+* `AppError` 是跨层传递的统一错误语义对象
+* 不允许在 `StateContext.last_error` 中有时放字符串、有时放异常实例
+
+---
+
+## 9.3 文件：`domain/models.py`
+
+### 职责
+
+定义所有核心领域模型与配置模型。
+
+### 必须包含的对象
+
+#### `RecognitionResult`
+
+```python
+@dataclass
+class RecognitionResult:
+    plant_name: str | None
+    display_name: str
+    confidence: float
+    is_recognized: bool
+```
+
+#### `RecordEvent`
+
+```python
+@dataclass
+class RecordEvent:
+    region_id: str
+    plant_name: str
+    display_name: str
+    confidence: float
+    timestamp: str
+```
+
+#### `RegionStatsItem`
+
+```python
+@dataclass
+class RegionStatsItem:
+    plant_name: str
+    display_name: str
+    count: int
+    last_confidence: float
+    last_seen_at: str
+```
+
+#### `RegionStatsFile`
+
+```python
+@dataclass
+class RegionStatsFile:
+    region_id: str
+    plant_count: int
+    items: list[RegionStatsItem]
+    updated_at: str
+```
+
+#### `MapConfig`
+
+```python
+@dataclass
+class MapConfig:
+    map_id: str
+    display_name: str
+    regions: list["RegionConfig"]
+```
+
+#### `RegionConfig`
+
+```python
+@dataclass
+class RegionConfig:
+    region_id: str
+    display_name: str
+```
+
+#### `SystemConfig`
+
+```python
+@dataclass
+class SystemConfig:
+    recognition_threshold: float
+    display_timeout_s: float
+    infer_timeout_s: float
+    record_timeout_s: float
+    long_press_threshold_ms: int
+    log_level: str
+    release_gate_accuracy_threshold: float
+```
+
+#### `ModelManifest`
+
+```python
+@dataclass
+class ModelManifest:
+    model_version: str
+    model_file: str
+    output_classes: int
+    training_dataset_name: str
+    evaluated_top1_accuracy: float
+    quantization_type: str
+    input_shape: list[int]
+    input_dtype: str
+    output_dtype: str
+    label_version: str
+    created_at: str
+```
+
+### 结构边界说明
+
+* `RecordEvent` 是单次记录语义对象
+* `RegionStatsFile` 是统计持久化对象
+* 两者不能混用
+* `StateContext` 不属于 `models.py`
+
+这些都来自架构文档的数据模型定义。 
+
+---
+
+## 9.4 文件：`domain/rules.py`
+
+### 职责
+
+承载纯规则函数。
+
+### 建议函数
+
+```python
+def is_recognized(confidence: float, threshold: float) -> bool: ...
+def can_record(result: RecognitionResult) -> bool: ...
+def can_add_new_species(stats: RegionStatsFile) -> bool: ...
+def can_increment_count(item: RegionStatsItem) -> bool: ...
+def next_stats_page_index(current: int, total_pages: int) -> int: ...
+```
+
+### 原则
+
+* 尽量纯函数
+* 不读写文件
+* 不调用 Renderer
+* 不依赖 StateMachine
+* 不含 GPIO / Camera / JSON 实现细节
+
+---
+
+## 9.5 文件：`domain/recognition_service.py`
+
+### 职责
+
+将推理原始输出转换为统一领域结果。
+
+### 建议接口
+
+```python
+class RecognitionService:
+    def build_result(
+        self,
+        raw_output: list[float],
+        label_repo: "LabelRepository",
+        threshold: float
+    ) -> RecognitionResult: ...
+```
+
+### 关键规则
+
+* 取 Top-1 作为候选结果
+* 低于阈值则输出“未识别”
+* 高于阈值则输出类别结果
+* 置信度阈值判断必须在领域层完成，不得放在 UI 或存储层
+
+架构文档已明确这一点。 
+
+---
+
+## 9.6 文件：`domain/sampling_recorder.py`
+
+### 职责
+
+这是采样模式下的核心领域服务之一。
+
+它负责：
+
+1. 读取当前区域的统计文件
+2. 根据识别结果决定是否记录
+3. 执行唯一键去重
+4. 执行 `count + 1`
+5. 更新 `last_confidence`
+6. 更新 `last_seen_at`
+7. 更新 `updated_at`
+8. 校验容量限制
+9. 调用存储适配器保存
+10. 返回新的 `RegionStatsFile`
+
+### 建议接口
+
+```python
+class SamplingRecorder:
+    def record(
+        self,
+        region_id: str,
+        result: RecognitionResult,
+        now_iso: str
+    ) -> RegionStatsFile: ...
+```
+
+### 核心业务规则
+
+这些都来自架构文档： 
+
+* 唯一键：`plant_name + region_id`
+* 已存在则 `count + 1`
+* 即使短时间重复识别也计数
+* `count` 最大 999
+* 新植物前必须检查“种类数 ≤ 50”
+* 文件接近 1MB 时停止写入并提示
+* 只有 `is_recognized == true` 才记录
+* 单次识别最多更新一次记录
+* 更新 `last_confidence`
+* 更新 `last_seen_at`
+* 更新 `updated_at`
+
+### 不负责
+
+* 不决定是否进入 `RECORDING`
+* 不发状态迁移事件
+* 不渲染提示页面
+* 不解释错误恢复最终跳转
+
+---
+
+## 9.7 文件：`domain/statistics_query_service.py`
+
+### 职责
+
+从统计文件构造统计页所需的只读视图。
+
+### 建议接口
+
+```python
+class StatisticsQueryService:
+    def get_region_stats(self, region_id: str) -> RegionStatsFile | None: ...
+    def sort_items(self, stats: RegionStatsFile) -> RegionStatsFile: ...
+    def build_page(self, stats: RegionStatsFile, page_index: int) -> "StatsPage": ...
+```
+
+### 关键规则
+
+* 排序规则必须固定
+* 每页固定 4 条
+* 空数据有空态
+* 数据损坏时输出错误占位所需视图，而不是把原始异常交给 UI
+
+### 建议排序
+
+* 固定按 `display_name` 升序
+* 如果后续项目内部统一用 `plant_name`，则全项目保持唯一口径
+* 当前归档版推荐：`display_name` 升序
+
+---
+
+## 9.8 文件：`domain/release_gate_service.py`
+
+### 职责
+
+将“模型发布门槛”落实为可执行校验。
+
+### 建议接口
+
+```python
+class ReleaseGateService:
+    def validate(
+        self,
+        model_output_shape: tuple[int, ...],
+        labels_count: int,
+        manifest: ModelManifest,
+        threshold: float
+    ) -> None: ...
+```
+
+### 必须校验的内容
+
+根据架构文档： 
+
+* 输出类别数是否正确
+* 标签数量是否一致
+* 标签索引是否连续
+* 阈值配置是否有效
+* `evaluated_top1_accuracy` 是否达到门槛
+* manifest 是否存在关键字段
+
+### 不负责
+
+* 不做推理执行
+* 不渲染页面
+* 不决定 `ERROR` 页样式
+
+---
+
+# 10. infrastructure 层详细设计
+
+这一层负责接触真实世界。
+它是“脏接口层”，但必须向上暴露干净接口。
+
+---
+
+## 10.1 目录：`infrastructure/input/`
+
+### 文件：`base_input_adapter.py`
+
+### 职责
+
+定义原始输入接口，而不是直接返回 `Event`。
+
+### 原因
+
+如果输入层直接返回 `Event`，后续很容易违规返回 `RETRY_PRESS`。
+因此这里必须定义原始输入抽象。
+
+### 建议定义
+
+```python
+from enum import Enum, auto
+from typing import Protocol
+
+class RawInput(Enum):
+    CONFIRM = auto()
+    NAV = auto()
+    BACK_LONG = auto()
+    NAV_LONG = auto()
+
+class BaseInputAdapter(Protocol):
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def poll_raw_inputs(self) -> list[RawInput]: ...
+```
+
+### 文件：`gpio_button_adapter.py`
+
+* 两键 GPIO 输入实现
+* 处理去抖
+* 处理长按判定
+* 输出 `RawInput`
+
+### 文件：`keyboard_adapter.py`
+
+* 调试用输入实现
+* 输出 `RawInput`
+
+### 明确禁止
+
+* 不允许直接输出 `RETRY_PRESS`
+* 不允许输出 `INFER_OK / BOOT_FAIL`
+* 不允许改状态
+
+---
+
+## 10.2 目录：`infrastructure/camera/`
+
+### 文件：`base_camera_adapter.py`
+
+```python
+class BaseCameraAdapter(Protocol):
+    def start_preview(self) -> None: ...
+    def capture_frame(self) -> object: ...
+    def stop_preview(self) -> None: ...
+    def health_check(self) -> None: ...
+```
+
+### 文件：`picamera2_adapter.py`
+
+* Picamera2 的实际实现
+
+### 关键要求
+
+* 预览与抓帧共用同一链路
+* 尽量避免重复初始化
+* 相机失败时不得进入 `PREVIEW`
+
+这些要求来自架构文档。 
+
+---
+
+## 10.3 目录：`infrastructure/inference/`
+
+### 文件：`base_inference_adapter.py`
+
+```python
+class BaseInferenceAdapter(Protocol):
+    def load_model(self) -> None: ...
+    def infer(self, frame: object) -> list[float]: ...
+    def health_check(self) -> None: ...
+    def get_output_shape(self) -> tuple[int, ...]: ...
+    def get_model_metadata(self) -> dict: ...
+```
+
+### 文件：`tflite_adapter.py`
+
+* TFLite 具体实现
+
+### 关键要求
+
+* 固定后处理口径
+* 能暴露输出维度
+* 能暴露模型元信息
+* 为 `ReleaseGateService` 提供必要输入
+
+---
+
+## 10.4 目录：`infrastructure/storage/`
+
+### 文件：`base_storage_adapter.py`
+
+```python
+class BaseStorageAdapter(Protocol):
+    def load_region_stats(self, region_id: str) -> RegionStatsFile | None: ...
+    def save_region_stats(self, region_id: str, data: RegionStatsFile) -> None: ...
+    def estimate_file_size(self, data: RegionStatsFile) -> int: ...
+```
+
+### 文件：`json_storage_adapter.py`
+
+* 基于本地 JSON 的持久化实现
+
+### 关键要求
+
+* 每个 Region 一个文件
+* 原子写入
+* 文件大小估算
+* JSON 格式校验
+
+这些要求来自架构文档。 
+
+---
+
+## 10.5 目录：`infrastructure/config/`
+
+### 文件列表
+
+* `system_config_repository.py`
+* `sampling_config_repository.py`
+* `label_repository.py`
+* `model_manifest_repository.py`
+
+### 职责
+
+* 读取配置文件
+* 解析配置文件
+* 提供只读查询接口
+* 必要时做格式校验
+
+### 说明
+
+它们被称为 Repository，但本质仍属于基础设施，因为它们接触的是文件系统。
+
+---
+
+## 10.6 目录：`infrastructure/logging/`
+
+### 文件：`logger.py`
+
+### 职责
+
+* 提供统一日志输出接口
+* 承载最小可观测性设计
+
+### 建议记录内容
+
+架构文档已要求至少支持： 
+
+* 启动日志
+* 状态迁移
+* 抓帧耗时
+* 推理耗时
+* 写入耗时
+* 错误事件
+* 心跳日志
+
+---
+
+# 11. presentation 层详细设计
+
+Presentation 层只负责呈现，不负责决定。
+这一层的任何越权，都会直接破坏“状态驱动 UI”的架构基线。 
+
+---
+
+## 11.1 文件：`presentation/renderer.py`
+
+### 职责
+
+统一渲染入口。
+
+### 建议接口
+
+```python
+class UIRenderer:
+    def render(self, state: State, ctx: StateContext) -> None: ...
+```
+
+### 规则
+
+* 只根据 `State + StateContext` 选择页面
+* 不持有第二套业务状态
+* 不直接访问 Adapter
+* 不直接访问 Domain Service
+
+---
+
+## 11.2 文件：`presentation/view_models.py`
+
+### 职责
+
+将领域对象或上下文转换为页面易用的展示模型。
+
+### 原因
+
+如果页面直接消费复杂领域对象与上下文字段，最终 UI 层会开始做业务判断，破坏硬规则一。
+
+### 建议 ViewModel
+
+* `HomeViewModel`
+* `MapSelectViewModel`
+* `RegionSelectViewModel`
+* `PreviewViewModel`
+* `DisplayViewModel`
+* `StatsViewModel`
+* `ErrorViewModel`
+
+### 规则
+
+* ViewModel 只负责展示转换
+* 不负责业务决策
+* 不产生事件
+* 不读写文件
+
+---
+
+## 11.3 目录：`presentation/pages/`
+
+### 页面列表
+
+* `booting_page.py`
+* `home_page.py`
+* `map_page.py`
+* `region_page.py`
+* `preview_page.py`
+* `inferencing_overlay.py`
+* `display_page.py`
+* `stats_page.py`
+* `error_page.py`
+
+### 来源说明
+
+这些页面集合与架构文档中的 `UIRenderer` 页面集合一致。 
+
+### 特别说明
+
+* `CAPTURED` 不需要独立页面
+* `RECORDING` 不要求独立复杂页面，可沿用 Display 或轻提示
+* `Inferencing` 更适合做覆盖层，而非完整独立页面
+
+### 硬规则联动
+
+* 页面不得做领域规则判断
+* 页面不得自行决定是否切状态
+* 页面不得自行决定重试逻辑
+
+---
+
+# 12. 类定义总表（冻结）
+
+---
+
+## 12.1 controller
+
+* `AppController`
+
+## 12.2 application
+
+* `State`
+* `Event`
+* `StateContext`
+* `EventQueue`
+* `InputMapper`
+* `ErrorPolicy`
+* `GuardEvaluator`
+* `TimeoutScheduler`
+* `TransitionEngine`
+* `StateMachine`
+* `BaseStateHandler`
+* `BootingHandler`
+* `HomeHandler`
+* `MapSelectHandler`
+* `RegionSelectHandler`
+* `PreviewHandler`
+* `CapturedHandler`
+* `InferencingHandler`
+* `DisplayHandler`
+* `RecordingHandler`
+* `StatsHandler`
+* `ErrorHandler`
+
+## 12.3 domain
+
+* `ErrorType`
+* `AppError`
+* `RecognitionResult`
+* `RecordEvent`
+* `RegionStatsItem`
+* `RegionStatsFile`
+* `MapConfig`
+* `RegionConfig`
+* `SystemConfig`
+* `ModelManifest`
+* `RecognitionService`
+* `SamplingRecorder`
+* `StatisticsQueryService`
+* `ReleaseGateService`
+
+## 12.4 infrastructure
+
+* `RawInput`
+* `BaseInputAdapter`
+* `GPIOButtonAdapter`
+* `KeyboardAdapter`
+* `BaseCameraAdapter`
+* `Picamera2CameraAdapter`
+* `BaseInferenceAdapter`
+* `TFLiteInferenceAdapter`
+* `BaseStorageAdapter`
+* `JsonStorageAdapter`
+* `SystemConfigRepository`
+* `SamplingConfigRepository`
+* `LabelRepository`
+* `ModelManifestRepository`
+
+## 12.5 presentation
+
+* `UIRenderer`
+* 各 Page 类
+* 各 ViewModel 类
+
+---
+
+# 13. 接口函数总表（冻结）
+
+---
+
+## 13.1 `AppController`
+
+```python
+class AppController:
+    def bootstrap(self) -> None: ...
+    def build_runtime(self) -> None: ...
+    def run(self) -> None: ...
+    def shutdown(self) -> None: ...
+```
+
+---
+
+## 13.2 `EventQueue`
+
+```python
+class EventQueue:
+    def enqueue(self, event: Event) -> None: ...
+    def dequeue(self) -> Event: ...
+    def is_empty(self) -> bool: ...
+    def clear(self) -> None: ...
+```
+
+---
+
+## 13.3 `InputMapper`
+
+```python
+class InputMapper:
+    def map_raw_input(self, raw_input: RawInput, current_state: State) -> Event | None: ...
+```
+
+---
+
+## 13.4 `TimeoutScheduler`
+
+```python
+class TimeoutScheduler:
+    def schedule(self, state: State, seconds: float) -> None: ...
+    def cancel(self, state: State) -> None: ...
+    def cancel_all(self) -> None: ...
+```
+
+---
+
+## 13.5 `TransitionEngine`
+
+```python
+class TransitionEngine:
+    def handle(self, state: State, event: Event, ctx: StateContext) -> None: ...
+    def validate_event(self, state: State, event: Event) -> None: ...
+    def evaluate_guard(self, state: State, event: Event, ctx: StateContext) -> bool: ...
+    def execute_transition(self, state: State, event: Event, ctx: StateContext) -> None: ...
+```
+
+---
+
+## 13.6 `StateMachine`
+
+```python
+class StateMachine:
+    def start(self) -> None: ...
+    def enqueue(self, event: Event) -> None: ...
+    def process_next_event(self) -> None: ...
+    def run_once(self) -> None: ...
+    def current_state(self) -> State: ...
+    def context(self) -> StateContext: ...
+```
+
+---
+
+## 13.7 `BaseStateHandler`
+
+```python
+class BaseStateHandler(Protocol):
+    def allowed_events(self) -> set[Event]: ...
+    def on_enter(self, ctx: StateContext) -> None: ...
+    def on_exit(self, ctx: StateContext) -> None: ...
+    def handle(self, event: Event, ctx: StateContext) -> None: ...
+```
+
+---
+
+## 13.8 `BaseInputAdapter`
+
+```python
+class BaseInputAdapter(Protocol):
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def poll_raw_inputs(self) -> list[RawInput]: ...
+```
+
+---
+
+## 13.9 `BaseCameraAdapter`
+
+```python
+class BaseCameraAdapter(Protocol):
+    def start_preview(self) -> None: ...
+    def capture_frame(self) -> object: ...
+    def stop_preview(self) -> None: ...
+    def health_check(self) -> None: ...
+```
+
+---
+
+## 13.10 `BaseInferenceAdapter`
+
+```python
+class BaseInferenceAdapter(Protocol):
+    def load_model(self) -> None: ...
+    def infer(self, frame: object) -> list[float]: ...
+    def health_check(self) -> None: ...
+    def get_output_shape(self) -> tuple[int, ...]: ...
+    def get_model_metadata(self) -> dict: ...
+```
+
+---
+
+## 13.11 `BaseStorageAdapter`
+
+```python
+class BaseStorageAdapter(Protocol):
+    def load_region_stats(self, region_id: str) -> RegionStatsFile | None: ...
+    def save_region_stats(self, region_id: str, data: RegionStatsFile) -> None: ...
+    def estimate_file_size(self, data: RegionStatsFile) -> int: ...
+```
+
+---
+
+## 13.12 `RecognitionService`
+
+```python
+class RecognitionService:
+    def build_result(
+        self,
+        raw_output: list[float],
+        label_repo: LabelRepository,
+        threshold: float
+    ) -> RecognitionResult: ...
+```
+
+---
+
+## 13.13 `SamplingRecorder`
+
+```python
+class SamplingRecorder:
+    def record(
+        self,
+        region_id: str,
+        result: RecognitionResult,
+        now_iso: str
+    ) -> RegionStatsFile: ...
+```
+
+---
+
+## 13.14 `StatisticsQueryService`
+
+```python
+class StatisticsQueryService:
+    def get_region_stats(self, region_id: str) -> RegionStatsFile | None: ...
+    def sort_items(self, stats: RegionStatsFile) -> RegionStatsFile: ...
+    def build_page(self, stats: RegionStatsFile, page_index: int) -> "StatsPage": ...
+```
+
+---
+
+## 13.15 `ReleaseGateService`
+
+```python
+class ReleaseGateService:
+    def validate(
+        self,
+        model_output_shape: tuple[int, ...],
+        labels_count: int,
+        manifest: ModelManifest,
+        threshold: float
+    ) -> None: ...
+```
+
+---
+
+## 13.16 `UIRenderer`
+
+```python
+class UIRenderer:
+    def render(self, state: State, ctx: StateContext) -> None: ...
+```
+
+---
+
+# 14. 配置与持久化映射（冻结）
+
+---
+
+## 14.1 `config/system_config.json`
+
+### 对应代码
+
+* `SystemConfigRepository`
+* `SystemConfig`
+
+### 内容职责
+
+根据架构文档，至少应承载： 
+
+* 拒识阈值
+* 自动返回时间
+* 性能阈值
+* 日志级别
+* 长按阈值
+* 发布门槛配置
+
+---
+
+## 14.2 `config/labels.json`
+
+### 对应代码
+
+* `LabelRepository`
+
+### 内容职责
+
+根据架构文档，至少应包含： 
+
+* 类别索引
+* `plant_key`
+* `plant_name`
+* `display_name`
+
+---
+
+## 14.3 `config/sampling_config.json`
+
+### 对应代码
+
+* `SamplingConfigRepository`
+* `MapConfig`
+* `RegionConfig`
+
+### 内容职责
+
+* map 列表
+* region 列表
+
+---
+
+## 14.4 `config/model_manifest.json`
+
+### 对应代码
+
+- `ModelManifestRepository`
+- `ModelManifest`
+- `ReleaseGateService`
+
+---
+
+### 内容职责
+
+`model_manifest.json` 用于描述模型的**部署契约与发布门禁输入**，  
+在系统启动阶段由 `ModelManifestRepository` 加载，并由 `ReleaseGateService` 进行一致性与门禁校验。
+
+当前冻结版本包含以下字段：
+
+- `model_version`
+- `model_file`
+- `output_classes`
+- `training_dataset_name`
+- `evaluated_top1_accuracy`
+- `quantization_type`
+- `input_shape`
+- `input_dtype`
+- `output_dtype`
+- `label_version`
+- `created_at`
+
+---
+
+### 字段说明
+
+- `model_version`  
+  模型版本标识，用于区分不同模型版本（如 `plant_classifier_int8_v1`）
+
+- `model_file`  
+  模型文件名，例如 `plant_classifier_int8.tflite`  
+  不包含绝对路径，由部署结构决定实际加载路径
+
+- `output_classes`  
+  模型输出类别数  
+  必须与 `labels.json` 中的标签数量完全一致
+
+- `training_dataset_name`  
+  模型训练所使用的数据集名称
+
+- `evaluated_top1_accuracy`  
+  模型在验证集上的 Top-1 准确率  
+  使用 `0~1` 浮点表示（例如 `0.8713`）
+
+- `quantization_type`  
+  模型量化类型，例如：
+  - `float32`
+  - `float16`
+  - `int8`
+
+- `input_shape`  
+  模型输入张量形状，例如 `[1, 224, 224, 3]`
+
+- `input_dtype`  
+  模型输入数据类型，例如 `uint8`
+
+- `output_dtype`  
+  模型输出数据类型，例如 `uint8`
+
+- `label_version`  
+  模型所对应的 `labels.json` 版本号，用于一致性校验
+
+- `created_at`  
+  manifest 创建时间（ISO 8601 格式），用于版本追踪与归档
+
+---
+
+### 结构约束
+
+必须满足以下约束：
+
+- `output_classes == len(labels.json.labels)`
+- `evaluated_top1_accuracy >= system_config.release_gate.min_top1_accuracy`（发布门禁要求）
+- `input_shape` 必须与实际模型输入一致
+- `input_dtype / output_dtype` 必须与实际部署模型一致
+- `label_version` 必须与当前 `labels.json` 版本一致
+- `model_file` 必须指向实际部署的模型文件
+
+---
+
+### 启动期校验职责
+
+在系统启动阶段（`BOOTING`），需执行：
+
+- 加载 `model_manifest.json`
+- 加载 `labels.json`
+- 加载 `system_config.json`
+- 调用 `ReleaseGateService` 执行校验，包括：
+  - 输出类别数一致性
+  - 标签版本一致性
+  - 准确率是否达标
+  - 模型输入输出规格是否合理
+
+若校验失败：
+
+```text
+BOOT_FAIL → ERROR
+```
+
+---
+
+## 14.5 `data/regions/region_<region_id>.json`
+
+
+### 对应代码
+
+* `JsonStorageAdapter`
+* `RegionStatsFile`
+* `RegionStatsItem`
+* `SamplingRecorder`
+* `StatisticsQueryService`
+
+### 规则
+
+* 每个 Region 一个文件
+* 降低损坏影响范围
+* 与“数据按 Region 独立存储”一致
+
+这来自架构文档。 
+
+---
+
+# 15. 明确禁止的实现方式（硬约束）
+
+下面这些实现方式一律不允许。
+
+## 15.1 控制流违规
+
+* UI 直接修改状态
+* Adapter 直接修改状态
+* Service 直接修改状态
+* 跳过 `EventQueue`
+* 在 `on_enter()` 内递归调用下一次状态处理
+* 在 handler 中直接 `current_state = ...`
+
+## 15.2 事件来源违规
+
+* `InputAdapter` 直接产生 `RETRY_PRESS`
+* UI 直接产生 `INFER_OK / BOOT_FAIL / RECORD_FAIL`
+* StorageAdapter 自己发 `SYSTEM_ERROR`
+* TimeoutScheduler 自己发 `INFER_FAIL`
+
+## 15.3 UI 越权违规
+
+* UI 判断“置信度 < 60%”
+* UI 判断“当前结果是否该记录”
+* UI 自己解析 JSON 决定分页规则
+* UI 决定错误恢复跳转目标
+* UI 调用 Service 或 Adapter 进行业务动作
+
+## 15.4 状态实现违规
+
+* 合并 `DISPLAY` 与 `RECORDING`
+* 新增架构外状态
+* 允许第二个 `STATS` 入口
+* 把 `mode` 当成状态
+* 用页面名替代状态名
+
+## 15.5 领域污染违规
+
+* Domain import GPIO / Picamera2 / TFLite / JSON adapter
+* Domain 直接 import Renderer
+* Domain 直接持有 `StateMachine`
+* 用 `StateContext` 替代领域持久化对象
+
+## 15.6 错误处理违规
+
+* 用字符串拼错误类型到处传播
+* 在 UI 层判断错误是否可重试
+* 在某个 handler 里私定恢复目标
+* 让 `ErrorPolicy` 直接改状态
+
+---
+
+# 16. 这版结构对个人开发者的实际意义
+
+这部分不是口号，而是实话。
+
+这套结构已经明显比“写一个树莓派单文件脚本”复杂，但它并没有过度设计到企业级框架的程度。
+它保留的复杂度，都是这个项目必须面对的复杂度：
+
+* 你必须有状态机骨架
+* 你必须有事件队列
+* 你必须有状态上下文
+* 你必须把输入与 `RETRY_PRESS` 映射隔离开
+* 你必须把 `DISPLAY` 与 `RECORDING` 分离
+* 你必须把错误恢复集中化
+* 你必须把相机/推理/存储/配置隔离进适配器层
+* 你必须避免 UI 成为第二业务层
+
+同时，它没有引入以下不必要复杂度：
+
+* IoC 容器
+* 数据库
+* 远程服务层
+* 多线程消息分发
+* 插件系统
+* 过度抽象的接口工厂
+
+因此，它仍然符合“低复杂度、可维护、适合个人开发”的总目标。 
+
+---
+
+# 17. 最终结论
+
+本归档版代码结构设计已经达到以下状态：
+
+## 17.1 与基线一致
+
+* 与《架构设计_v2.1》一致
+* 与《状态机详细设计 v2.0》一致
+
+## 17.2 结构完整
+
+* 目录已冻结
+* 模块已冻结
+* 核心类已冻结
+* 核心接口已冻结
+* 依赖方向已冻结
+* 禁止事项已冻结
+
+## 17.3 控制流闭环完整
+
+* 原始输入 → 输入映射 → 事件入队 → 状态机消费 → 迁移执行 → handler 动作 → UI 渲染
+  已完整闭环
+
+## 17.4 新增硬规则已全文回灌
+
+本版不只是把三条硬规则写在总则中，而是已经完整回灌到：
+
+* Presentation 设计
+* TransitionEngine 与 StateHandler 边界
+* ErrorPolicy 语义
+* StateHandlers 职责
+* 禁止事项
+
+因此不存在“总则说一套，后文仍然松口”的问题。
+
+---
+
+# 18. 一句话总结
+
+> 本文档定义了一套**以 `StateMachine` 为唯一控制核心、以 `EventQueue` 为唯一事件入口、以 `TransitionEngine` 执行迁移、以 Domain 承载规则、以 Infrastructure 隔离外部依赖、以 Presentation 纯渲染**的完整代码结构；它已经达到可直接开始编码的最终归档标准。
+
+```
+```

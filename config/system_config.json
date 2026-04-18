@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "recognition_threshold": 0.6,
+  "display_timeout_s": 5.0,
+  "infer_timeout_s": 3.0,
+  "record_timeout_s": 1.0,
+  "capture_debounce_ms": 300,
+  "long_press_threshold_ms": 800,
+  "log_level": "INFO",
+  "release_gate": {
+    "min_top1_accuracy": 0.85,
+    "required_output_classes": 30
+  },
+  "performance_budget": {
+    "capture_s": 0.2,
+    "infer_s": 2.5,
+    "full_flow_s": 3.0
+  }
+}

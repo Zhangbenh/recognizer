@@ -1,0 +1,521 @@
+```markdown
+# 架构设计文档（V1）
+
+## 1. 文档目标
+
+本文档基于已确认的用户故事、系统说明及系统基线，提供一份**可直接指导实现的完整架构设计**。
+
+目标：
+
+- 可在 Raspberry Pi 4B 2GB 上稳定运行
+- 支持离线植物识别与区域采样
+- 保持系统结构简单、清晰、可维护
+- 为后续实现提供明确边界
+
+---
+
+## 2. 架构目标与设计原则
+
+### 2.1 架构目标
+
+系统需要：
+
+1. 稳定运行在边缘设备（树莓派）
+2. 实现完整识别闭环
+3. 支持区域数据记录
+4. 控制复杂度，便于个体开发
+
+---
+
+### 2.2 设计原则
+
+#### 状态机唯一控制流
+所有流程必须由状态机驱动，禁止绕过状态机直接操作流程。
+
+#### 适配器隔离
+硬件与框架通过适配层隔离：
+
+- 相机
+- 输入
+- 推理
+- 存储
+
+#### 单线程主控
+- 主逻辑单线程
+- 阻塞行为必须在状态内可控
+
+#### 最小复杂度
+不引入：
+- 多进程
+- 插件系统
+- 消息总线
+
+---
+
+## 3. 系统上下文
+
+### 3.1 运行环境
+
+- Raspberry Pi 4B (2GB)
+- Camera Module 3
+- 3.5 inch HDMI LCD
+- GPIO 按键输入（2键）
+
+---
+
+### 3.2 外部依赖
+
+仅依赖本地资源：
+
+- 相机
+- 屏幕
+- 按键
+- 模型文件
+- JSON 数据
+
+---
+
+### 3.3 非目标
+
+- 云服务
+- 数据同步
+- 动态配置
+- 数据删除
+
+---
+
+## 4. 总体架构
+
+### 4.1 分层结构
+
+```
+
+Presentation Layer
+↓
+Application Layer
+↓
+Domain Layer
+↓
+Infrastructure Layer
+
+```
+
+---
+
+### 4.2 各层职责
+
+#### Presentation Layer
+- UI 渲染
+- 不参与业务逻辑
+
+#### Application Layer
+- 状态机
+- 事件处理
+- 流程控制
+
+#### Domain Layer
+- 业务规则
+- 数据模型
+
+#### Infrastructure Layer
+- 相机
+- 输入
+- 推理
+- 存储
+
+---
+
+## 5. 核心模块设计
+
+### 5.1 AppController
+系统入口：
+
+- 初始化模块
+- 启动状态机
+- 控制生命周期
+
+---
+
+### 5.2 StateMachine
+
+核心职责：
+
+- 状态管理
+- 状态迁移
+- 输入处理
+
+---
+
+### 5.3 InputAdapter
+
+统一输入事件：
+
+- CONFIRM_PRESS
+- NAV_PRESS
+- BACK_LONG_PRESS
+
+实现：
+
+- GPIOButtonAdapter
+- KeyboardAdapter
+
+---
+
+### 5.4 CameraAdapter
+
+接口：
+
+```
+
+start_preview()
+capture_frame()
+stop_preview()
+
+```
+
+实现：
+
+- Picamera2
+
+---
+
+### 5.5 InferenceAdapter
+
+接口：
+
+```
+
+load_model()
+infer(frame)
+
+```
+
+实现：
+
+- TFLite
+
+---
+
+### 5.6 RecognitionService
+
+职责：
+
+- 输出解析
+- 标签映射
+- 阈值判断
+
+输出：
+
+```
+
+RecognitionResult
+
+```
+
+---
+
+### 5.7 LabelRepository
+
+职责：
+
+- 加载标签 JSON
+- 索引 → label 映射
+
+---
+
+### 5.8 StorageAdapter
+
+职责：
+
+- JSON 读写
+- 数据校验
+- 原子写入
+
+---
+
+### 5.9 SamplingRecorder
+
+职责：
+
+- 去重
+- 计数
+- 写入记录
+
+---
+
+### 5.10 UI Renderer
+
+页面：
+
+- Home
+- Map
+- Region
+- Preview
+- Display
+- Stats
+
+---
+
+## 6. 状态机设计
+
+### 6.1 状态列表
+
+- Idle
+- Preview
+- Captured
+- Inferencing
+- Display
+- Recording
+
+---
+
+### 6.2 流程
+
+#### 普通模式
+
+```
+
+Preview → Capture → Infer → Display → Preview
+
+```
+
+#### 采样模式
+
+```
+
+Home → Map → Region → Preview → Infer → Display → Record → Preview
+
+```
+
+---
+
+### 6.3 输入控制
+
+| 状态 | 输入 |
+|------|------|
+| Inferencing | 忽略 |
+| Recording | 忽略 |
+| Display | 允许返回 |
+
+---
+
+### 6.4 超时规则
+
+- Inferencing >3s → 失败
+- Recording >1s → 失败
+- Display >5s → 返回
+
+---
+
+## 7. 识别链路
+
+```
+
+Preview
+→ Capture
+→ Resize
+→ TFLite
+→ Postprocess
+→ Display
+
+```
+
+---
+
+## 8. 数据架构
+
+### 8.1 数据模型
+
+#### RecognitionResult
+```
+
+plant_key
+display_name
+confidence
+
+```
+
+#### RegionStats
+```
+
+plant_key
+count
+timestamp
+
+```
+
+---
+
+### 8.2 存储结构
+
+```
+
+data/
+region_x.json
+
+```
+
+---
+
+### 8.3 规则
+
+- 唯一键：plant_key + region_id
+- count ≤ 999
+- 种类 ≤ 50
+- JSON ≤ 1MB
+
+---
+
+## 9. UI 架构
+
+### 9.1 页面
+
+- Preview：全屏 + 准星
+- Inferencing：中央提示
+- Display：底部结果
+
+---
+
+### 9.2 原则
+
+- UI 由状态驱动
+- UI 不保存业务状态
+
+---
+
+## 10. 错误处理
+
+### 10.1 策略
+
+Fail Fast + 显式提示 + 返回安全状态
+
+---
+
+### 10.2 分类
+
+- CameraError
+- InferenceError
+- StorageError
+- DataError
+
+---
+
+## 11. 部署架构
+
+### 11.1 运行模式
+
+- 单进程
+- 单线程
+
+---
+
+### 11.2 启动流程
+
+```
+
+加载配置
+→ 初始化模块
+→ 启动状态机
+
+```
+
+---
+
+## 12. 接口定义（简化）
+
+### Input
+```
+
+poll_event()
+
+```
+
+### Camera
+```
+
+capture_frame()
+
+```
+
+### Inference
+```
+
+infer()
+
+```
+
+### Storage
+```
+
+save()
+load()
+
+```
+
+---
+
+## 13. 关键流程
+
+### 识别流程
+
+```
+
+按键
+→ 拍照
+→ 推理
+→ 显示
+→ 返回
+
+```
+
+---
+
+### 采样流程
+
+```
+
+识别
+→ 判断置信度
+→ 写入数据
+→ 返回
+
+```
+
+---
+
+## 14. 风险
+
+### 1. 置信度解释
+需确认 uint8 输出如何映射百分比
+
+### 2. UI 与相机兼容
+需验证显示方案
+
+### 3. JSON 损坏
+需做保护写入
+
+---
+
+## 15. 架构总结
+
+系统本质：
+
+> 状态机驱动 + 本地推理 + JSON存储 + 简单输入设备
+
+特点：
+
+- 简单
+- 可控
+- 可扩展
+- 适合个体开发者
+```
+
+---
+
+如果你下一步要继续深入，我建议最有价值的是：
+
+👉 **状态机详细设计（状态图 + 转移表）**
+或
+👉 **模块代码结构设计（目录 + 类划分）**
+
+这两步会直接把你带到“可以开始写代码”的阶段。
