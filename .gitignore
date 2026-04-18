@@ -45,7 +45,8 @@ data/regions/*.tmp
 data/regions/*.bak
 
 # 如果后期想忽略真实数据，打开这一行：
-# data/regions/*.json
+data/regions/*.json
+
 
 # =========================
 # Env files
