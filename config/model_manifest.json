@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "model_version": "plant_classifier_int8_v1",
+  "model_file": "plant_classifier_int8.tflite",
+  "output_classes": 30,
+  "training_dataset_name": "reymond/plants_type_dataset",
+  "evaluated_top1_accuracy": 0.8713,
+  "quantization_type": "int8",
+  "input_shape": [1, 224, 224, 3],
+  "input_dtype": "uint8",
+  "output_dtype": "uint8",
+  "label_version": "1.0.0",
+  "created_at": "2026-04-18T00:00:00"
+}

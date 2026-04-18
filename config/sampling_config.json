@@ -1,0 +1,35 @@
+{
+  "version": "1.0.0",
+  "maps": [
+    {
+      "map_id": "map_a",
+      "display_name": "Map A",
+      "regions": [
+        { "region_id": "map_a_r1", "display_name": "Region 1" },
+        { "region_id": "map_a_r2", "display_name": "Region 2" },
+        { "region_id": "map_a_r3", "display_name": "Region 3" },
+        { "region_id": "map_a_r4", "display_name": "Region 4" }
+      ]
+    },
+    {
+      "map_id": "map_b",
+      "display_name": "Map B",
+      "regions": [
+        { "region_id": "map_b_r1", "display_name": "Region 1" },
+        { "region_id": "map_b_r2", "display_name": "Region 2" },
+        { "region_id": "map_b_r3", "display_name": "Region 3" },
+        { "region_id": "map_b_r4", "display_name": "Region 4" }
+      ]
+    },
+    {
+      "map_id": "map_c",
+      "display_name": "Map C",
+      "regions": [
+        { "region_id": "map_c_r1", "display_name": "Region 1" },
+        { "region_id": "map_c_r2", "display_name": "Region 2" },
+        { "region_id": "map_c_r3", "display_name": "Region 3" },
+        { "region_id": "map_c_r4", "display_name": "Region 4" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2100 @@
+````markdown
+# 状态机详细设计 v2.0（唯一实现依据版）
+## 基于《架构设计_v2.1》的最终、完整、可落地实现规范
+
+---
+
+## 0. 文档定位
+
+本文件是本项目**唯一有效的状态机实现依据**。
+
+使用原则：
+
+- 实现、联调、测试、评审，均以本文件为准
+- 若与《系统说明文档》存在冲突，以《架构设计_v2.1》为最高标准
+- 若后续代码实现与本文件冲突，以本文件为准，代码必须修改
+- 本文件是**完整自包含文档**，不依赖 v1.0 / v1.1 / v1.1.1 / v1.2 的补丁阅读
+
+本文件严格继承《架构设计_v2.1》的关键约束，包括但不限于：
+
+- 单线程状态机驱动
+- UI 完全由状态驱动
+- 普通模式与采样模式双主流程
+- `STATS` 入口固定为 `REGION_SELECT -> STATS`
+- `INFERENCING / RECORDING` 不可中断
+- 采样模式下 `DISPLAY` 不允许取消记录
+- 运行期错误优先降级回安全状态，启动期致命错误进入 `ERROR`
+- 本地 JSON 持久化与受控数据增长
+- 状态机是唯一控制流中心。:contentReference[oaicite:0]{index=0}
+
+---
+
+# 1. 设计目标
+
+本状态机设计必须满足以下目标：
+
+1. **可直接编码**  
+   开发者无需再补设计决策，即可实现 `StateMachine`、`StateContext`、事件队列、状态处理器与转移表。
+
+2. **无歧义**  
+   每个状态都必须明确：
+   - 进入动作
+   - 退出动作
+   - 可接收事件
+   - 非法事件处理
+   - 超时规则
+   - 数据上下文要求
+
+3. **与架构一致**  
+   不得脱离《架构设计_v2.1》的状态、流程、错误恢复、输入模型、统计入口、记录规则。:contentReference[oaicite:1]{index=1}
+
+4. **可验证**  
+   所有主流程、异常流、边界流都可直接转化为测试用例。
+
+---
+
+# 2. 状态机总览
+
+---
+
+## 2.1 状态集合（唯一合法集合）
+
+```text
+BOOTING
+HOME
+MAP_SELECT
+REGION_SELECT
+PREVIEW
+CAPTURED
+INFERENCING
+DISPLAY
+RECORDING
+STATS
+ERROR
+````
+
+说明：
+
+* 任意时刻只允许一个状态活跃
+* 不允许出现架构外的新业务状态
+* 不允许使用 UI 页面名替代状态名
+
+---
+
+## 2.2 模式上下文
+
+`mode` 不是状态，而是状态机运行上下文的一部分。
+
+唯一合法值：
+
+```text
+normal
+sampling
+```
+
+作用：
+
+* 区分普通模式与采样模式在 `PREVIEW / DISPLAY / BACK_LONG_PRESS / RECORDING` 等状态中的迁移差异
+
+---
+
+## 2.3 主流程定义
+
+### 普通模式主流程
+
+```text
+HOME
+-> PREVIEW
+-> CAPTURED
+-> INFERENCING
+-> DISPLAY
+-> PREVIEW
+```
+
+### 采样模式主流程
+
+```text
+HOME
+-> MAP_SELECT
+-> REGION_SELECT
+-> PREVIEW
+-> CAPTURED
+-> INFERENCING
+-> DISPLAY
+-> RECORDING
+-> PREVIEW
+```
+
+### 统计路径
+
+```text
+REGION_SELECT
+-> STATS
+-> REGION_SELECT
+```
+
+以上主流程必须与《架构设计_v2.1》保持一致。
+
+---
+
+# 3. 执行模型（最终冻结）
+
+---
+
+## 3.1 单线程事件驱动模型
+
+状态机采用**单线程、单事件队列、串行消费**模型。
+
+唯一合法处理模型：
+
+```text
+EventQueue (FIFO)
+
+while running:
+    event = dequeue()
+    handle_event(event)
+```
+
+### 强制规则
+
+* 所有事件都必须进入 `EventQueue`
+* 禁止任何模块绕过队列直接改状态
+* 禁止多线程并发消费事件
+* 禁止递归处理下一个事件
+
+---
+
+## 3.2 统一事件入口规则
+
+### 所有事件必须入队
+
+包括：
+
+* 外部输入事件
+* 内部流程事件
+* 超时事件
+* 系统错误事件
+
+### 禁止行为
+
+* ❌ `handle_event(event)` 被 UI 直接调用
+* ❌ 在 `on_enter` 内同步调用 `handle_event`
+* ❌ 在 `on_exit` 内触发状态跳转
+* ❌ Adapter 直接改 `current_state`
+
+---
+
+## 3.3 状态迁移执行顺序（唯一合法顺序）
+
+```text
+1. validate_event(current_state, event)
+2. evaluate_guard(current_state, event, context)
+3. current_state.on_exit(context)
+4. execute_transition_action(current_state, event, context)
+5. update_state(next_state)
+6. next_state.on_enter(context)
+7. enqueue_internal_event_if_needed()
+```
+
+### 规则解释
+
+#### 1. validate_event
+
+判断该事件在当前状态下是：
+
+* 允许事件
+* 非法外部事件
+* 非法内部事件
+
+#### 2. evaluate_guard
+
+判断守卫条件是否满足：
+
+* 满足：执行迁移
+* 不满足：按本状态定义的“守卫失败处理”执行，通常为忽略或留在当前状态
+
+#### 3. on_exit
+
+执行当前状态的退出清理动作
+
+#### 4. execute_transition_action
+
+执行迁移动作：
+
+* 更新上下文
+* 写入错误信息
+* 保存选择项
+* 启动目标状态所需参数准备
+
+#### 5. update_state
+
+真正变更 `current_state`
+
+#### 6. on_enter
+
+执行目标状态的进入动作
+
+#### 7. enqueue_internal_event_if_needed
+
+若目标状态进入后需要立刻推进流程，不直接递归执行，而是**入队**内部事件，等待主循环下一拍消费
+
+---
+
+## 3.4 非法事件统一处理规则
+
+### 非法外部事件
+
+处理方式：
+
+```text
+log_warning
+ignore
+stay current state
+```
+
+### 非法内部事件
+
+处理方式：
+
+```text
+log_error
+enqueue SYSTEM_ERROR
+```
+
+然后：
+
+```text
+SYSTEM_ERROR -> ERROR
+```
+
+### 原则
+
+* 用户误操作：不应导致系统崩溃
+* 内部逻辑错乱：必须提升为系统级错误
+
+---
+
+# 4. 事件系统
+
+---
+
+## 4.1 外部事件（仅输入层允许产生）
+
+```text
+CONFIRM_PRESS
+NAV_PRESS
+BACK_LONG_PRESS
+NAV_LONG_PRESS
+RETRY_PRESS
+```
+
+### 含义定义
+
+#### CONFIRM_PRESS
+
+* 确认当前选择
+* 在 `PREVIEW` 中触发抓帧
+* 在 `ERROR` 中被映射为 `RETRY_PRESS`
+
+#### NAV_PRESS
+
+* 在列表页切换到下一个选项
+* 在 `STATS` 中翻到下一页
+
+#### BACK_LONG_PRESS
+
+* 长按返回
+* 只在允许返回的状态中有效
+
+#### NAV_LONG_PRESS
+
+* 仅在 `REGION_SELECT` 中有效，用于进入 `STATS`
+
+#### RETRY_PRESS
+
+* 逻辑事件
+* 物理来源固定为：`ERROR` 页面中的 `CONFIRM_PRESS`
+
+---
+
+## 4.2 内部事件（仅系统/服务层允许产生）
+
+```text
+BOOT_OK
+BOOT_FAIL
+CAPTURE_OK
+CAPTURE_FAIL
+INFER_OK
+INFER_FAIL
+RECORD_OK
+RECORD_FAIL
+TIMEOUT
+SYSTEM_ERROR
+```
+
+### 含义定义
+
+#### BOOT_OK
+
+启动初始化成功
+
+#### BOOT_FAIL
+
+启动初始化失败，且错误进入 `ERROR`
+
+#### CAPTURE_OK
+
+运行期抓帧成功
+
+#### CAPTURE_FAIL
+
+运行期抓帧失败
+
+#### INFER_OK
+
+推理成功并已生成 `RecognitionResult`
+
+#### INFER_FAIL
+
+推理失败、推理异常或推理超时后的统一失败事件
+
+#### RECORD_OK
+
+记录成功
+
+#### RECORD_FAIL
+
+记录失败、写入失败或记录超时后的统一失败事件
+
+#### TIMEOUT
+
+由定时器系统产生的统一超时事件，由当前状态解释
+
+#### SYSTEM_ERROR
+
+未分类异常、非法内部事件、逻辑错乱等致命兜底事件
+
+---
+
+## 4.3 事件来源约束矩阵
+
+| 来源                    | 允许产生的事件                                                        |
+| --------------------- | -------------------------------------------------------------- |
+| InputAdapter          | `CONFIRM_PRESS / NAV_PRESS / BACK_LONG_PRESS / NAV_LONG_PRESS` |
+| ErrorPage 输入映射        | `RETRY_PRESS`                                                  |
+| Boot 初始化逻辑            | `BOOT_OK / BOOT_FAIL`                                          |
+| Camera/抓帧流程           | `CAPTURE_OK / CAPTURE_FAIL`                                    |
+| Inference 流程          | `INFER_OK / INFER_FAIL`                                        |
+| Recording 流程          | `RECORD_OK / RECORD_FAIL`                                      |
+| TimeoutScheduler      | `TIMEOUT`                                                      |
+| StateMachine / 全局异常捕获 | `SYSTEM_ERROR`                                                 |
+
+### 强制规则
+
+* UI 不得产生内部事件
+* InputAdapter 不得产生内部事件
+* Service/Adapter 不得改状态，只能发事件
+* `RETRY_PRESS` 不作为第三物理按键暴露
+
+---
+
+# 5. 守卫条件（Guards）
+
+---
+
+## 5.1 守卫条件列表
+
+```text
+selected_home_option == normal
+selected_home_option == sampling
+has_available_maps == true
+has_available_maps == false
+has_available_regions == true
+last_recognition_result.is_recognized == true
+last_recognition_result.is_recognized == false
+error_is_retryable == true
+error_is_retryable == false
+retry_success == true
+retry_success == false
+mode == normal
+mode == sampling
+```
+
+---
+
+## 5.2 守卫失败的统一原则
+
+* 默认行为：**忽略并留在当前状态**
+* 不满足条件但属于系统配置错误：**转为 SYSTEM_ERROR 或启动期 BOOT_FAIL**
+* 不允许在守卫失败时进入未定义状态
+
+---
+
+# 6. 状态上下文（StateContext）
+
+---
+
+## 6.1 最小必要字段（最终版）
+
+```text
+mode
+selected_home_option
+selected_map_id
+selected_map_index
+selected_region_id
+selected_region_index
+selected_stats_page_index
+last_captured_frame
+last_recognition_result
+last_error
+error_is_retryable
+display_deadline
+infer_deadline
+record_deadline
+current_stats_snapshot
+```
+
+---
+
+## 6.2 字段说明
+
+### mode
+
+当前模式：`normal / sampling`
+
+### selected_home_option
+
+首页高亮选项：`normal / sampling`
+
+### selected_map_id / selected_map_index
+
+当前选中的地图
+
+### selected_region_id / selected_region_index
+
+当前选中的区域
+
+### selected_stats_page_index
+
+当前统计页页码，从 0 开始
+
+### last_captured_frame
+
+最近一次冻结下来的识别帧
+
+### last_recognition_result
+
+最近一次识别结果
+
+### last_error
+
+最近一次错误对象，至少包含：
+
+* `error_type`
+* `message`
+* `retryable`
+
+### error_is_retryable
+
+是否可重试
+
+### display_deadline / infer_deadline / record_deadline
+
+用于当前状态超时判断的绝对时间点或调度句柄
+
+### current_stats_snapshot
+
+当前区域统计数据视图，用于 `STATS` 页面渲染
+
+---
+
+# 7. 定时器与超时系统
+
+---
+
+## 7.1 超时触发原则
+
+* 只有支持超时的状态才允许注册超时
+* 超时发生时，定时器系统只入队 `TIMEOUT`
+* 由当前状态决定 `TIMEOUT` 的语义
+* 状态切换时，旧状态定时器必须清理
+
+---
+
+## 7.2 支持超时的状态
+
+| 状态            | 超时阈值 | TIMEOUT 解释        |
+| ------------- | ---: | ----------------- |
+| `INFERENCING` |  3 秒 | 转换为 `INFER_FAIL`  |
+| `DISPLAY`     |  5 秒 | 普通模式返回 / 采样模式分流   |
+| `RECORDING`   |  1 秒 | 转换为 `RECORD_FAIL` |
+
+其他状态：
+
+* 无超时
+* 收到 `TIMEOUT` 一律视为非法内部事件
+
+---
+
+## 7.3 超时事件处理规则
+
+### INFERENCING
+
+```text
+TIMEOUT
+-> enqueue INFER_FAIL
+```
+
+### DISPLAY
+
+```text
+TIMEOUT
+-> normal: PREVIEW
+-> sampling + recognized: RECORDING
+-> sampling + unrecognized: PREVIEW
+```
+
+### RECORDING
+
+```text
+TIMEOUT
+-> enqueue RECORD_FAIL
+```
+
+---
+
+# 8. 页面/状态映射
+
+---
+
+## 8.1 固定映射关系
+
+| 状态              | 页面/显示形式         |
+| --------------- | --------------- |
+| `BOOTING`       | 启动画面            |
+| `HOME`          | 模式选择页           |
+| `MAP_SELECT`    | 地图选择页           |
+| `REGION_SELECT` | 区域选择页           |
+| `PREVIEW`       | 实时取景页           |
+| `CAPTURED`      | 不单独切页，沿用冻结画面    |
+| `INFERENCING`   | 推理中提示覆盖层        |
+| `DISPLAY`       | 结果展示页           |
+| `RECORDING`     | 沿用结果页或轻提示，不单独换页 |
+| `STATS`         | 统计页             |
+| `ERROR`         | 错误页             |
+
+---
+
+## 8.2 强制规则
+
+* UI 只渲染状态，不决策流程
+* UI 不直接访问推理适配器、存储适配器
+* `CAPTURED` 不是独立可交互页面
+* `RECORDING` 不引入新的复杂界面交互
+
+---
+
+# 9. 列表与分页规则（最终冻结）
+
+---
+
+## 9.1 HOME 导航规则
+
+* 进入 `HOME` 时，强制：
+
+  ```text
+  selected_home_option = normal
+  ```
+* 不保留上次首页高亮
+
+### NAV_PRESS
+
+```text
+normal <-> sampling
+```
+
+说明：
+
+* 只有两个选项，因此采用二值翻转
+* 不存在“第三项”或空选中状态
+
+---
+
+## 9.2 MAP_SELECT 导航规则
+
+### 前提
+
+* 合法空地图配置允许系统启动
+* 若地图列表为空，页面显示“无可用地图”
+
+### 默认高亮
+
+* 若有地图：进入时默认高亮第一项
+* 若无地图：无高亮项，保持空态
+
+### NAV_PRESS
+
+* 有地图：切换到下一个，末尾回到开头
+* 无地图：忽略
+
+### CONFIRM_PRESS
+
+* 有地图：进入 `REGION_SELECT`
+* 无地图：停留当前状态并提示“无可用地图”
+
+### BACK_LONG_PRESS
+
+* 返回 `HOME`
+
+---
+
+## 9.3 REGION_SELECT 导航规则
+
+### 前提
+
+* `Region` 列表必须 ≥1
+* 若某地图无区域，属于 `ConfigError`
+* 该错误必须在启动期被拦截，不允许运行期进入空 `REGION_SELECT`
+
+### 默认高亮
+
+* 进入时默认高亮第一项
+
+### NAV_PRESS
+
+* 切换到下一个区域，末尾回到开头
+
+### CONFIRM_PRESS
+
+* 保存当前 `selected_region_id`
+* 进入 `PREVIEW`
+
+### BACK_LONG_PRESS
+
+* 返回 `MAP_SELECT`
+
+### NAV_LONG_PRESS
+
+* 进入 `STATS`
+
+---
+
+## 9.4 STATS 分页规则
+
+### 固定分页大小
+
+* 每页固定显示 **4 条**
+
+### 数据排序规则
+
+统计项默认按以下规则排序：
+
+1. `plant_name` 升序
+   或者若已有明确显示名标准，则使用稳定一致的 `display_name` 升序
+
+> 为保证测试稳定性，必须固定一种排序。
+> 本规范推荐：**按 `display_name` 升序**。
+> 若实现中无 `display_name` 独立排序需求，则按 `plant_name` 升序，但必须全项目一致。
+
+为消除歧义，本版最终固定为：
+
+```text
+按 display_name 升序
+```
+
+### 分页计算规则
+
+* `total_items = 0`：空态，只有 1 个空页
+* `total_pages = ceil(total_items / 4)`
+* 最后一页不足 4 条时，按实际条数显示
+
+### 进入 STATS 时页码规则
+
+* 每次进入 `STATS`，都强制：
+
+  ```text
+  selected_stats_page_index = 0
+  ```
+
+### NAV_PRESS
+
+* 非空数据：下一页，末页回第一页
+* 空态：忽略，不翻页
+
+### BACK_LONG_PRESS
+
+* 返回 `REGION_SELECT`
+
+### 数据更新规则
+
+* `STATS` 仅在进入状态时加载快照
+* 停留在 `STATS` 时，不做自动刷新
+* 再次进入 `STATS` 时重新加载
+
+---
+
+# 10. 错误模型（最终冻结）
+
+---
+
+## 10.1 错误类型矩阵
+
+| 错误类型               | 发生阶段  | 是否进入 ERROR | 是否可重试 | 最终去向      |
+| ------------------ | ----- | ---------: | ----: | --------- |
+| `CameraError`      | 启动期   |          是 |     是 | `ERROR`   |
+| `CameraError`      | 运行期抓帧 |          否 |     否 | `PREVIEW` |
+| `ModelError`       | 启动期   |          是 |     是 | `ERROR`   |
+| `LabelError`       | 启动期   |          是 |     是 | `ERROR`   |
+| `ConfigError`      | 启动期   |          是 |     是 | `ERROR`   |
+| `ReleaseGateError` | 启动期   |          是 |     否 | `ERROR`   |
+| `DataError`        | 统计读取期 |          否 |     否 | `STATS`   |
+| `StorageError`     | 记录期   |          否 |     否 | `PREVIEW` |
+| `InferenceError`   | 运行期推理 |          否 |     否 | `PREVIEW` |
+| `SYSTEM_ERROR`     | 任意期   |          是 |     否 | `ERROR`   |
+
+---
+
+## 10.2 固定恢复原则
+
+### 启动期致命错误
+
+进入 `ERROR`
+
+包括：
+
+* `CameraError`（启动）
+* `ModelError`
+* `LabelError`
+* `ConfigError`
+* `ReleaseGateError`
+
+### 运行期可降级错误
+
+提示后回安全状态，不进入 `ERROR`
+
+包括：
+
+* `CAPTURE_FAIL`
+* `INFER_FAIL`
+* `RECORD_FAIL`
+* `StorageError`
+* `InferenceError`
+* 运行期 `CameraError`
+
+### 统计数据损坏
+
+不影响主识别流程：
+
+```text
+停留 STATS
+显示错误提示
+显示空数据/错误占位
+```
+
+---
+
+## 10.3 SYSTEM_ERROR 定义
+
+以下情况统一视为 `SYSTEM_ERROR`：
+
+* 未分类异常
+* 非法内部事件
+* 不应出现的状态-事件组合导致的逻辑错乱
+* 断言失败
+* 状态上下文关键字段缺失且无法安全恢复
+
+统一行为：
+
+```text
+enqueue SYSTEM_ERROR
+-> ERROR
+```
+
+---
+
+# 11. ERROR 重试规则（最终冻结）
+
+---
+
+## 11.1 物理输入映射
+
+在 `ERROR` 页面：
+
+```text
+CONFIRM_PRESS -> RETRY_PRESS
+```
+
+说明：
+
+* 不引入第三种物理输入
+* 不使用组合键
+* `RETRY_PRESS` 只是状态机逻辑事件
+
+---
+
+## 11.2 可重试矩阵
+
+| 错误类型               | 可重试 | 重试动作                         |
+| ------------------ | --: | ---------------------------- |
+| `CameraError`（启动）  |   是 | 重新初始化 camera 并做 health check |
+| `ModelError`       |   是 | 重新加载 model                   |
+| `LabelError`       |   是 | 重新加载 labels 并校验              |
+| `ConfigError`      |   是 | 重新加载配置并重新校验                  |
+| `ReleaseGateError` |   否 | 无                            |
+| `SYSTEM_ERROR`     |   否 | 无                            |
+
+---
+
+## 11.3 RETRY_PRESS 行为
+
+### 可重试且成功
+
+```text
+RETRY_PRESS
+-> 执行重试动作
+-> 成功
+-> HOME
+```
+
+### 可重试但失败
+
+```text
+RETRY_PRESS
+-> 执行重试动作
+-> 失败
+-> ERROR
+```
+
+### 不可重试
+
+```text
+RETRY_PRESS
+-> ignore
+-> stay ERROR
+```
+
+---
+
+# 12. 状态详细设计（完整展开）
+
+---
+
+# 12.1 BOOTING
+
+## 定义
+
+系统启动与依赖初始化状态。
+
+---
+
+## 进入动作
+
+按固定顺序执行：
+
+1. 加载 `system_config`
+2. 加载 `labels`
+3. 加载 `sampling_config`
+4. 校验：
+
+   * map 数量规则
+   * region 数量规则
+   * 配置合法性
+5. 加载 `model_manifest`
+6. 初始化输入适配器
+7. 初始化相机
+8. 加载模型
+9. 执行 release gate 校验
+10. 若全部成功：
+
+    ```text
+    enqueue BOOT_OK
+    ```
+11. 若任一步失败：
+
+    * 填充 `last_error`
+    * 设置 `error_is_retryable`
+    * `enqueue BOOT_FAIL`
+
+---
+
+## 退出动作
+
+* 清理启动期临时对象
+* 保留已成功初始化的长期依赖实例
+* 不清理 `last_error`，由进入目标状态决定
+
+---
+
+## 可接收事件
+
+* `BOOT_OK`
+* `BOOT_FAIL`
+
+---
+
+## 允许迁移
+
+| 事件          | 守卫 | 迁移动作                 | 下一状态    |
+| ----------- | -- | -------------------- | ------- |
+| `BOOT_OK`   | -  | 清除启动错误展示态            | `HOME`  |
+| `BOOT_FAIL` | -  | 保留错误信息供 `ERROR` 页面展示 | `ERROR` |
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* `CONFIRM_PRESS`
+* `NAV_PRESS`
+* `BACK_LONG_PRESS`
+* `NAV_LONG_PRESS`
+* `RETRY_PRESS`
+
+处理：
+
+```text
+warning + ignore
+```
+
+### 非法内部事件
+
+* `CAPTURE_OK / CAPTURE_FAIL / INFER_OK / INFER_FAIL / RECORD_OK / RECORD_FAIL / TIMEOUT / SYSTEM_ERROR`（除非由全局异常入口专门发出 SYSTEM_ERROR）
+
+处理：
+
+```text
+error + enqueue SYSTEM_ERROR
+```
+
+---
+
+## 超时规则
+
+* 无业务超时
+* `TIMEOUT` 在该状态中视为非法内部事件
+
+---
+
+# 12.2 HOME
+
+## 定义
+
+模式选择状态。
+
+---
+
+## 进入动作
+
+1. 渲染模式选择页
+2. 强制：
+
+   ```text
+   selected_home_option = normal
+   ```
+3. 清理上一轮流程遗留的临时状态：
+
+   * `last_captured_frame`
+   * `last_recognition_result`
+   * `display_deadline`
+   * `infer_deadline`
+   * `record_deadline`
+4. 清理非致命错误提示
+
+---
+
+## 退出动作
+
+* 保留当前 `selected_home_option`
+* 不保留任何首页临时 UI 动画状态
+
+---
+
+## 可接收事件
+
+* `NAV_PRESS`
+* `CONFIRM_PRESS`
+
+---
+
+## 允许迁移
+
+| 事件              | 守卫                                 | 迁移动作                                             | 下一状态         |
+| --------------- | ---------------------------------- | ------------------------------------------------ | ------------ |
+| `NAV_PRESS`     | -                                  | `selected_home_option` 在 `normal / sampling` 间翻转 | `HOME`       |
+| `CONFIRM_PRESS` | `selected_home_option == normal`   | `mode = normal`                                  | `PREVIEW`    |
+| `CONFIRM_PRESS` | `selected_home_option == sampling` | `mode = sampling`                                | `MAP_SELECT` |
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* `BACK_LONG_PRESS`
+* `NAV_LONG_PRESS`
+* `RETRY_PRESS`
+
+处理：
+
+```text
+warning + ignore
+```
+
+### 非法内部事件
+
+* `BOOT_OK / BOOT_FAIL / CAPTURE_OK / CAPTURE_FAIL / INFER_OK / INFER_FAIL / RECORD_OK / RECORD_FAIL / TIMEOUT`
+
+处理：
+
+```text
+error + enqueue SYSTEM_ERROR
+```
+
+---
+
+## 超时规则
+
+* 无
+* `TIMEOUT` 在该状态中视为非法内部事件
+
+---
+
+# 12.3 MAP_SELECT
+
+## 定义
+
+采样模式下的地图选择状态。
+
+---
+
+## 进入动作
+
+1. 渲染地图选择页
+2. 加载地图列表视图
+3. 若 `has_available_maps == true`：
+
+   * `selected_map_index = 0`
+   * `selected_map_id = maps[0].id`
+4. 若 `has_available_maps == false`：
+
+   * 显示空态 “No available maps”
+   * `selected_map_index = null`
+   * `selected_map_id = null`
+
+---
+
+## 退出动作
+
+* 保留当前选中的 `selected_map_id / selected_map_index`
+
+---
+
+## 可接收事件
+
+* `NAV_PRESS`
+* `CONFIRM_PRESS`
+* `BACK_LONG_PRESS`
+
+---
+
+## 允许迁移
+
+| 事件                | 守卫                            | 迁移动作                                  | 下一状态            |
+| ----------------- | ----------------------------- | ------------------------------------- | --------------- |
+| `NAV_PRESS`       | `has_available_maps == true`  | 地图索引 +1，末尾回到开头，同步更新 `selected_map_id` | `MAP_SELECT`    |
+| `NAV_PRESS`       | `has_available_maps == false` | 忽略                                    | `MAP_SELECT`    |
+| `CONFIRM_PRESS`   | `has_available_maps == true`  | 保留当前地图选择                              | `REGION_SELECT` |
+| `CONFIRM_PRESS`   | `has_available_maps == false` | 显示提示 “No available maps”              | `MAP_SELECT`    |
+| `BACK_LONG_PRESS` | -                             | 清理当前地图页临时提示                           | `HOME`          |
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* `NAV_LONG_PRESS`
+* `RETRY_PRESS`
+
+### 非法内部事件
+
+* 所有非当前状态需要的内部事件，包括 `TIMEOUT`
+
+处理原则同全局规则。
+
+---
+
+## 超时规则
+
+* 无
+
+---
+
+# 12.4 REGION_SELECT
+
+## 定义
+
+采样模式下的区域选择状态。
+
+---
+
+## 前置保证
+
+* 运行期不允许进入空 `REGION_SELECT`
+* 若当前地图无区域，属于 `ConfigError`
+* 必须在 `BOOTING` 阶段拦截并走 `BOOT_FAIL`
+
+---
+
+## 进入动作
+
+1. 加载当前 `selected_map_id` 对应的区域列表
+2. 断言区域数量 ≥1，否则触发：
+
+   ```text
+   enqueue SYSTEM_ERROR
+   ```
+3. 渲染区域选择页
+4. 默认高亮第一项：
+
+   * `selected_region_index = 0`
+   * `selected_region_id = regions[0].id`
+
+---
+
+## 退出动作
+
+* 保留当前 `selected_region_id / selected_region_index`
+
+---
+
+## 可接收事件
+
+* `NAV_PRESS`
+* `CONFIRM_PRESS`
+* `BACK_LONG_PRESS`
+* `NAV_LONG_PRESS`
+
+---
+
+## 允许迁移
+
+| 事件                | 守卫 | 迁移动作                                     | 下一状态            |
+| ----------------- | -- | ---------------------------------------- | --------------- |
+| `NAV_PRESS`       | -  | 区域索引 +1，末尾回到开头，同步更新 `selected_region_id` | `REGION_SELECT` |
+| `CONFIRM_PRESS`   | -  | 保留当前区域选择                                 | `PREVIEW`       |
+| `BACK_LONG_PRESS` | -  | 返回上一级                                    | `MAP_SELECT`    |
+| `NAV_LONG_PRESS`  | -  | `selected_stats_page_index = 0`          | `STATS`         |
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* `RETRY_PRESS`
+
+### 非法内部事件
+
+* `BOOT_OK / BOOT_FAIL / CAPTURE_* / INFER_* / RECORD_* / TIMEOUT`
+
+按全局非法内部事件规则处理。
+
+---
+
+## 超时规则
+
+* 无
+
+---
+
+# 12.5 STATS
+
+## 定义
+
+当前区域统计查看状态。
+
+---
+
+## 进入动作
+
+1. 基于 `selected_region_id` 加载统计数据
+2. `selected_stats_page_index = 0`
+3. 若加载成功：
+
+   * 将结果按 `display_name` 升序排序
+   * 生成 `current_stats_snapshot`
+4. 若读取失败或数据损坏：
+
+   * 将 `current_stats_snapshot` 置为空态
+   * 记录 `DataError`
+   * 页面显示错误提示与空数据占位
+5. 渲染统计页第 0 页
+
+---
+
+## 退出动作
+
+* 清理统计页临时视图状态
+* 可选择保留 `current_stats_snapshot` 作为只读缓存；若保留，也必须在下次进入时重新加载覆盖
+
+---
+
+## 可接收事件
+
+* `NAV_PRESS`
+* `BACK_LONG_PRESS`
+
+---
+
+## 允许迁移
+
+| 事件                | 守卫                                               | 迁移动作                                                    | 下一状态            |
+| ----------------- | ------------------------------------------------ | ------------------------------------------------------- | --------------- |
+| `NAV_PRESS`       | `current_stats_snapshot` 非空 且 `total_pages > 1`  | `selected_stats_page_index = (index + 1) % total_pages` | `STATS`         |
+| `NAV_PRESS`       | `current_stats_snapshot` 为空 或 `total_pages == 1` | 忽略                                                      | `STATS`         |
+| `BACK_LONG_PRESS` | -                                                | 清理统计页提示                                                 | `REGION_SELECT` |
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* `CONFIRM_PRESS`
+* `NAV_LONG_PRESS`
+* `RETRY_PRESS`
+
+处理：
+
+```text
+warning + ignore
+```
+
+### 非法内部事件
+
+* `BOOT_* / CAPTURE_* / INFER_* / RECORD_* / TIMEOUT`
+
+处理：
+
+```text
+error + enqueue SYSTEM_ERROR
+```
+
+---
+
+## 超时规则
+
+* 无
+
+---
+
+## DataError 固定行为
+
+即使出现统计数据损坏，也必须：
+
+```text
+stay STATS
+show error hint
+show empty placeholder
+```
+
+不得：
+
+* 自动跳回 `REGION_SELECT`
+* 进入 `ERROR`
+* 中断主识别流程
+
+---
+
+# 12.6 PREVIEW
+
+## 定义
+
+实时取景状态。
+
+---
+
+## 进入动作
+
+1. 启动或保持相机预览链路
+2. 渲染取景页
+3. 显示中央准星
+4. 清空上一轮不再需要的结果显示状态
+5. 若来自采样模式，保留当前 `selected_region_id`
+6. 若来自普通模式，确保 `mode == normal`
+7. 不启动业务超时
+
+---
+
+## 退出动作
+
+* 不停止相机链路
+* 保留预览资源，以避免重复初始化
+* 清理仅属于本次取景页的短暂 UI 提示
+
+---
+
+## 可接收事件
+
+* `CONFIRM_PRESS`
+* `BACK_LONG_PRESS`
+
+---
+
+## 允许迁移
+
+| 事件                | 守卫                 | 迁移动作                              | 下一状态            |
+| ----------------- | ------------------ | --------------------------------- | --------------- |
+| `CONFIRM_PRESS`   | -                  | 请求抓帧；冻结当前帧到 `last_captured_frame` | `CAPTURED`      |
+| `BACK_LONG_PRESS` | `mode == normal`   | 返回首页                              | `HOME`          |
+| `BACK_LONG_PRESS` | `mode == sampling` | 返回区域选择                            | `REGION_SELECT` |
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* `NAV_PRESS`
+* `NAV_LONG_PRESS`
+* `RETRY_PRESS`
+
+### 非法内部事件
+
+* `BOOT_* / CAPTURE_OK / CAPTURE_FAIL / INFER_* / RECORD_* / TIMEOUT`
+
+按全局规则处理。
+
+---
+
+## 运行期相机错误
+
+若在 `PREVIEW` 中检测到相机预览链路不可恢复异常，可：
+
+```text
+enqueue SYSTEM_ERROR
+```
+
+但**普通抓帧失败**不在 `PREVIEW` 直接处理，而在 `CAPTURED` 流程中以 `CAPTURE_FAIL` 处理。
+
+---
+
+## 超时规则
+
+* 无
+
+---
+
+# 12.7 CAPTURED
+
+## 定义
+
+抓帧完成后的纯逻辑中间态。
+
+---
+
+## 核心语义
+
+* 不对应独立 UI 页面
+* 屏幕保持上一帧冻结画面
+* 不允许停留
+* 进入后必须尽快派发 `CAPTURE_OK` 或 `CAPTURE_FAIL`
+
+---
+
+## 进入动作
+
+1. 确认 `last_captured_frame` 已存在
+2. 若帧有效：
+
+   ```text
+   enqueue CAPTURE_OK
+   ```
+3. 若帧无效或抓帧失败：
+
+   * 填写运行期 `CameraError`
+   * `enqueue CAPTURE_FAIL`
+
+---
+
+## 退出动作
+
+* 无
+
+---
+
+## 可接收事件
+
+* `CAPTURE_OK`
+* `CAPTURE_FAIL`
+
+---
+
+## 允许迁移
+
+| 事件             | 守卫 | 迁移动作        | 下一状态          |
+| -------------- | -- | ----------- | ------------- |
+| `CAPTURE_OK`   | -  | 准备推理输入      | `INFERENCING` |
+| `CAPTURE_FAIL` | -  | 显示错误提示（短提示） | `PREVIEW`     |
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* 所有外部事件均非法并忽略
+
+### 非法内部事件
+
+* `BOOT_* / INFER_* / RECORD_* / TIMEOUT / SYSTEM_ERROR`（`SYSTEM_ERROR` 若由全局异常入口产生则可转 ERROR）
+
+一般按全局非法内部事件规则处理。
+
+---
+
+## 超时规则
+
+* 无
+* 若出现停留，视为实现缺陷，应记录错误日志；但状态机层不单独设置超时
+
+---
+
+# 12.8 INFERENCING
+
+## 定义
+
+推理执行状态。
+
+---
+
+## 进入动作
+
+1. 渲染推理中覆盖层：
+
+   ```text
+   "AI识别中"
+   ```
+2. 注册 3 秒超时
+3. 保存 `infer_deadline`
+4. 基于 `last_captured_frame` 执行：
+
+   * 预处理
+   * 模型推理
+   * 后处理
+   * 置信度阈值判定
+   * 生成 `last_recognition_result`
+5. 若成功：
+
+   ```text
+   enqueue INFER_OK
+   ```
+6. 若失败、异常或推理链路错误：
+
+   * 记录 `InferenceError`
+   * `enqueue INFER_FAIL`
+
+---
+
+## 退出动作
+
+1. 清理推理计时器
+2. 清理本次推理临时对象
+3. `infer_deadline = null`
+
+---
+
+## 可接收事件
+
+* `INFER_OK`
+* `INFER_FAIL`
+* `TIMEOUT`
+
+---
+
+## 允许迁移
+
+| 事件           | 守卫 | 迁移动作                         | 下一状态          |
+| ------------ | -- | ---------------------------- | ------------- |
+| `INFER_OK`   | -  | 保留 `last_recognition_result` | `DISPLAY`     |
+| `INFER_FAIL` | -  | 显示失败提示                       | `PREVIEW`     |
+| `TIMEOUT`    | -  | `enqueue INFER_FAIL`         | `INFERENCING` |
+
+说明：
+
+* `TIMEOUT` 不直接跳转，而是统一转换为 `INFER_FAIL`
+* 真正迁移由 `INFER_FAIL` 完成
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* 所有外部事件均非法并忽略
+
+### 非法内部事件
+
+* `BOOT_* / CAPTURE_* / RECORD_*`
+
+按全局规则处理。
+
+---
+
+## 超时规则
+
+* 3 秒
+* 只允许当前状态解释 `TIMEOUT`
+
+---
+
+# 12.9 DISPLAY
+
+## 定义
+
+结果展示状态。
+
+---
+
+## 进入动作
+
+1. 渲染结果展示页
+2. 若 `last_recognition_result.is_recognized == true`：
+
+   * 显示植物名称
+   * 显示置信度
+3. 若 `is_recognized == false`：
+
+   * 显示 “未识别”
+4. 注册 5 秒显示超时
+5. 保存 `display_deadline`
+
+---
+
+## 退出动作
+
+1. 清理显示计时器
+2. `display_deadline = null`
+3. 清理本次展示专属轻提示
+
+---
+
+## 可接收事件
+
+* `TIMEOUT`
+* `BACK_LONG_PRESS`（仅普通模式）
+
+---
+
+## 允许迁移
+
+| 事件                | 守卫                                                                    | 迁移动作      | 下一状态        |
+| ----------------- | --------------------------------------------------------------------- | --------- | ----------- |
+| `TIMEOUT`         | `mode == normal`                                                      | 返回连续识别取景  | `PREVIEW`   |
+| `BACK_LONG_PRESS` | `mode == normal`                                                      | 立即返回取景    | `PREVIEW`   |
+| `TIMEOUT`         | `mode == sampling` 且 `last_recognition_result.is_recognized == true`  | 准备记录      | `RECORDING` |
+| `TIMEOUT`         | `mode == sampling` 且 `last_recognition_result.is_recognized == false` | 不记录，直接回取景 | `PREVIEW`   |
+
+---
+
+## 非法事件处理
+
+### 普通模式下非法外部事件
+
+* `CONFIRM_PRESS`
+* `NAV_PRESS`
+* `NAV_LONG_PRESS`
+* `RETRY_PRESS`
+
+### 采样模式下非法外部事件
+
+* 所有外部事件都非法，包括：
+
+  * `BACK_LONG_PRESS`
+  * `CONFIRM_PRESS`
+  * `NAV_PRESS`
+  * `NAV_LONG_PRESS`
+  * `RETRY_PRESS`
+
+处理：
+
+```text
+warning + ignore
+```
+
+### 非法内部事件
+
+* `BOOT_* / CAPTURE_* / INFER_OK / INFER_FAIL / RECORD_*`
+
+按全局规则处理。
+
+---
+
+## 超时规则
+
+* 5 秒
+* 采样模式下，不允许用户通过返回跳过将要发生的 `RECORDING`
+
+---
+
+# 12.10 RECORDING
+
+## 定义
+
+采样模式下的记录状态。
+
+---
+
+## 进入动作
+
+1. 注册 1 秒超时
+2. 保存 `record_deadline`
+3. 基于：
+
+   * `selected_region_id`
+   * `last_recognition_result`
+     执行记录流程
+4. 应用以下领域规则：
+
+   * 仅 `is_recognized == true` 才记录
+   * 唯一键：`plant_name + region_id`
+   * 已存在则 `count + 1`
+   * 更新 `last_confidence`
+   * 更新 `last_seen_at`
+   * 刷新 `updated_at`
+5. 写入本地 JSON
+6. 成功：
+
+   ```text
+   enqueue RECORD_OK
+   ```
+7. 失败：
+
+   * 记录 `StorageError`
+   * `enqueue RECORD_FAIL`
+
+---
+
+## 退出动作
+
+1. 清理记录计时器
+2. `record_deadline = null`
+3. 刷新 `current_stats_snapshot`（可选懒刷新，但必须保证下次进入 STATS 读到新数据）
+
+---
+
+## 可接收事件
+
+* `RECORD_OK`
+* `RECORD_FAIL`
+* `TIMEOUT`
+
+---
+
+## 允许迁移
+
+| 事件            | 守卫 | 迁移动作                  | 下一状态        |
+| ------------- | -- | --------------------- | ----------- |
+| `RECORD_OK`   | -  | 记录成功后回取景              | `PREVIEW`   |
+| `RECORD_FAIL` | -  | 显示错误提示但不中断流程          | `PREVIEW`   |
+| `TIMEOUT`     | -  | `enqueue RECORD_FAIL` | `RECORDING` |
+
+说明：
+
+* `TIMEOUT` 先统一转换成 `RECORD_FAIL`
+* 真正迁移由 `RECORD_FAIL` 完成
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* 所有外部事件均非法并忽略
+
+### 非法内部事件
+
+* `BOOT_* / CAPTURE_* / INFER_*`
+
+按全局规则处理。
+
+---
+
+## 超时规则
+
+* 1 秒
+
+---
+
+# 12.11 ERROR
+
+## 定义
+
+启动期致命错误或系统级错误的承载状态。
+
+---
+
+## 进入动作
+
+1. 渲染错误页
+2. 显示 `last_error.message`
+3. 根据 `error_is_retryable` 显示：
+
+   * 可重试提示
+   * 不可重试提示
+
+---
+
+## 退出动作
+
+* 清理错误页临时显示状态
+* 保留必要错误日志
+* 若重试成功，可清理 `last_error`
+
+---
+
+## 可接收事件
+
+* `RETRY_PRESS`
+* `CONFIRM_PRESS`（先映射为 `RETRY_PRESS`）
+
+---
+
+## 允许迁移
+
+| 事件              | 守卫                                                      | 迁移动作                 | 下一状态    |
+| --------------- | ------------------------------------------------------- | -------------------- | ------- |
+| `CONFIRM_PRESS` | -                                                       | 映射为 `RETRY_PRESS` 入队 | `ERROR` |
+| `RETRY_PRESS`   | `error_is_retryable == true` 且 `retry_success == true`  | 清理错误，回首页             | `HOME`  |
+| `RETRY_PRESS`   | `error_is_retryable == true` 且 `retry_success == false` | 更新错误信息，留在错误页         | `ERROR` |
+| `RETRY_PRESS`   | `error_is_retryable == false`                           | 忽略                   | `ERROR` |
+
+---
+
+## RETRY_PRESS 的执行细则
+
+### 若错误类型为 CameraError（启动）
+
+* 重新初始化 camera
+* 重做 health check
+
+### 若错误类型为 ModelError
+
+* 重新加载 model
+
+### 若错误类型为 LabelError
+
+* 重新加载 labels
+* 重新校验数量与索引
+
+### 若错误类型为 ConfigError
+
+* 重新加载配置
+* 重新做配置合法性校验
+
+### 若错误类型为不可重试错误
+
+* 直接留在 `ERROR`
+
+---
+
+## 非法事件处理
+
+### 非法外部事件
+
+* `NAV_PRESS`
+* `BACK_LONG_PRESS`
+* `NAV_LONG_PRESS`
+
+处理：
+
+```text
+warning + ignore
+```
+
+### 非法内部事件
+
+* `BOOT_* / CAPTURE_* / INFER_* / RECORD_* / TIMEOUT`
+
+按全局非法内部事件规则处理。
+
+---
+
+## 超时规则
+
+* 无
+
+---
+
+# 13. 完整状态转移矩阵（汇总）
+
+---
+
+## 13.1 启动流
+
+| 当前状态      | 事件          | 守卫 | 下一状态    |
+| --------- | ----------- | -- | ------- |
+| `BOOTING` | `BOOT_OK`   | -  | `HOME`  |
+| `BOOTING` | `BOOT_FAIL` | -  | `ERROR` |
+
+---
+
+## 13.2 首页流
+
+| 当前状态   | 事件              | 守卫                                 | 下一状态         |
+| ------ | --------------- | ---------------------------------- | ------------ |
+| `HOME` | `NAV_PRESS`     | -                                  | `HOME`       |
+| `HOME` | `CONFIRM_PRESS` | `selected_home_option == normal`   | `PREVIEW`    |
+| `HOME` | `CONFIRM_PRESS` | `selected_home_option == sampling` | `MAP_SELECT` |
+
+---
+
+## 13.3 地图流
+
+| 当前状态         | 事件                | 守卫                            | 下一状态            |
+| ------------ | ----------------- | ----------------------------- | --------------- |
+| `MAP_SELECT` | `NAV_PRESS`       | `has_available_maps == true`  | `MAP_SELECT`    |
+| `MAP_SELECT` | `NAV_PRESS`       | `has_available_maps == false` | `MAP_SELECT`    |
+| `MAP_SELECT` | `CONFIRM_PRESS`   | `has_available_maps == true`  | `REGION_SELECT` |
+| `MAP_SELECT` | `CONFIRM_PRESS`   | `has_available_maps == false` | `MAP_SELECT`    |
+| `MAP_SELECT` | `BACK_LONG_PRESS` | -                             | `HOME`          |
+
+---
+
+## 13.4 区域流
+
+| 当前状态            | 事件                | 守卫 | 下一状态            |
+| --------------- | ----------------- | -- | --------------- |
+| `REGION_SELECT` | `NAV_PRESS`       | -  | `REGION_SELECT` |
+| `REGION_SELECT` | `CONFIRM_PRESS`   | -  | `PREVIEW`       |
+| `REGION_SELECT` | `BACK_LONG_PRESS` | -  | `MAP_SELECT`    |
+| `REGION_SELECT` | `NAV_LONG_PRESS`  | -  | `STATS`         |
+
+---
+
+## 13.5 统计流
+
+| 当前状态    | 事件                | 守卫 | 下一状态            |
+| ------- | ----------------- | -- | --------------- |
+| `STATS` | `NAV_PRESS`       | -  | `STATS`         |
+| `STATS` | `BACK_LONG_PRESS` | -  | `REGION_SELECT` |
+
+---
+
+## 13.6 取景与识别流
+
+| 当前状态          | 事件                | 守卫                 | 下一状态                            |
+| ------------- | ----------------- | ------------------ | ------------------------------- |
+| `PREVIEW`     | `CONFIRM_PRESS`   | -                  | `CAPTURED`                      |
+| `PREVIEW`     | `BACK_LONG_PRESS` | `mode == normal`   | `HOME`                          |
+| `PREVIEW`     | `BACK_LONG_PRESS` | `mode == sampling` | `REGION_SELECT`                 |
+| `CAPTURED`    | `CAPTURE_OK`      | -                  | `INFERENCING`                   |
+| `CAPTURED`    | `CAPTURE_FAIL`    | -                  | `PREVIEW`                       |
+| `INFERENCING` | `INFER_OK`        | -                  | `DISPLAY`                       |
+| `INFERENCING` | `INFER_FAIL`      | -                  | `PREVIEW`                       |
+| `INFERENCING` | `TIMEOUT`         | -                  | `INFERENCING`（内部转 `INFER_FAIL`） |
+
+---
+
+## 13.7 展示与记录流
+
+| 当前状态        | 事件                | 守卫                                | 下一状态                           |
+| ----------- | ----------------- | --------------------------------- | ------------------------------ |
+| `DISPLAY`   | `TIMEOUT`         | `mode == normal`                  | `PREVIEW`                      |
+| `DISPLAY`   | `BACK_LONG_PRESS` | `mode == normal`                  | `PREVIEW`                      |
+| `DISPLAY`   | `TIMEOUT`         | `mode == sampling` 且 recognized   | `RECORDING`                    |
+| `DISPLAY`   | `TIMEOUT`         | `mode == sampling` 且 unrecognized | `PREVIEW`                      |
+| `RECORDING` | `RECORD_OK`       | -                                 | `PREVIEW`                      |
+| `RECORDING` | `RECORD_FAIL`     | -                                 | `PREVIEW`                      |
+| `RECORDING` | `TIMEOUT`         | -                                 | `RECORDING`（内部转 `RECORD_FAIL`） |
+
+---
+
+## 13.8 错误流
+
+| 当前状态    | 事件              | 守卫            | 下一状态                        |
+| ------- | --------------- | ------------- | --------------------------- |
+| `ERROR` | `CONFIRM_PRESS` | -             | `ERROR`（内部映射 `RETRY_PRESS`） |
+| `ERROR` | `RETRY_PRESS`   | retryable 且成功 | `HOME`                      |
+| `ERROR` | `RETRY_PRESS`   | retryable 且失败 | `ERROR`                     |
+| `ERROR` | `RETRY_PRESS`   | not retryable | `ERROR`                     |
+
+---
+
+# 14. 关键不变量（Invariants）
+
+---
+
+## 14.1 状态互斥不变量
+
+```text
+任何时刻 only one active state
+```
+
+---
+
+## 14.2 预览链路不变量
+
+* `PREVIEW` 与 `CAPTURED` 不重复初始化相机
+* `CAPTURED` 不独立建页
+
+---
+
+## 14.3 记录不变量
+
+* 只有 `RECORDING` 可以写统计数据
+* 采样模式下，`DISPLAY` 不能被用户跳过记录流程
+* 普通模式永不进入 `RECORDING`
+
+---
+
+## 14.4 统计入口不变量
+
+* `STATS` 只能由 `REGION_SELECT` 进入
+* 退出后只能回 `REGION_SELECT`
+
+---
+
+## 14.5 错误恢复不变量
+
+* 启动期致命错误进入 `ERROR`
+* 运行期可降级错误回安全状态
+* `DataError` 不得中断识别主流程
+
+---
+
+# 15. 代码落地建议（直接映射）
+
+---
+
+## 15.1 枚举建议
+
+```python
+class State(Enum):
+    BOOTING = auto()
+    HOME = auto()
+    MAP_SELECT = auto()
+    REGION_SELECT = auto()
+    PREVIEW = auto()
+    CAPTURED = auto()
+    INFERENCING = auto()
+    DISPLAY = auto()
+    RECORDING = auto()
+    STATS = auto()
+    ERROR = auto()
+```
+
+```python
+class Event(Enum):
+    CONFIRM_PRESS = auto()
+    NAV_PRESS = auto()
+    BACK_LONG_PRESS = auto()
+    NAV_LONG_PRESS = auto()
+    RETRY_PRESS = auto()
+    BOOT_OK = auto()
+    BOOT_FAIL = auto()
+    CAPTURE_OK = auto()
+    CAPTURE_FAIL = auto()
+    INFER_OK = auto()
+    INFER_FAIL = auto()
+    RECORD_OK = auto()
+    RECORD_FAIL = auto()
+    TIMEOUT = auto()
+    SYSTEM_ERROR = auto()
+```
+
+---
+
+## 15.2 处理器建议
+
+每个状态至少实现：
+
+* `on_enter(context)`
+* `on_exit(context)`
+* `allowed_events()`
+* `handle(event, context)` 或转移表查询
+
+---
+
+## 15.3 转移实现建议
+
+推荐使用：
+
+* 显式状态转移表
+* 每状态守卫函数
+* 非法事件统一处理函数
+* 统一 timeout scheduler
+
+不建议：
+
+* 让 UI if/else 决定跳转
+* 在 service 中直接 `current_state = ...`
+* 把错误处理散落在页面层
+
+---
+
+# 16. 验收映射（与状态机相关部分）
+
+---
+
+| 验收要求          | 状态机保障机制                                      |
+| ------------- | -------------------------------------------- |
+| 启动进入首页        | `BOOT_OK -> HOME`                            |
+| 普通模式确认后进入取景   | `HOME(normal) -> PREVIEW`                    |
+| 推理中不可中断       | `INFERENCING` 外部事件全忽略                        |
+| 记录中不可中断       | `RECORDING` 外部事件全忽略                          |
+| 显示后自动返回       | `DISPLAY` 的 5 秒 `TIMEOUT`                    |
+| 采样模式识别后自动记录   | `DISPLAY(sampling, recognized) -> RECORDING` |
+| 低置信度不记录       | `DISPLAY(sampling, unrecognized) -> PREVIEW` |
+| 统计入口固定        | `REGION_SELECT -> STATS -> REGION_SELECT`    |
+| 数据损坏提示但不影响主流程 | `DataError -> stay STATS`                    |
+| 推理失败回安全状态     | `INFER_FAIL -> PREVIEW`                      |
+| 写入失败回安全状态     | `RECORD_FAIL -> PREVIEW`                     |
+
+这些都与《架构设计_v2.1》的主约束一致。
+
+---
+
+# 17. 最终评估
+
+---
+
+## 17.1 完整性
+
+* 状态已完整定义
+* 事件已完整定义
+* 转移已完整定义
+* 非法事件处理已完整定义
+* 超时规则已完整定义
+* 错误路径已完整定义
+* 空列表/空数据边界已完整定义
+
+---
+
+## 17.2 可实现性
+
+* 可直接编码
+* 不需要补设计决策
+* 可直接转为测试用例
+
+---
+
+## 17.3 一致性
+
+* 与《架构设计_v2.1》一致
+* 与先前冻结决策一致
+* 无已知内部冲突。
+
+---
+
+# 18. 一句话结论
+
+> 本文档已经达到“唯一实现依据”的要求：
+> **完整、自包含、无歧义、可直接落地编码。**
+
+---
+
+```
+```
