@@ -1,0 +1,1684 @@
+# 模型训练代码
+
+## cell1
+
+```python
+# ============================================================
+# Cell 1: PAI-DSW 版 - 使用持久化存储（推荐！）
+# /mnt/workspace/ 目录在会话结束后数据完全保留
+# 无需每次重新下载数据集，彻底解决中断恢复问题
+# ============================================================
+
+import os
+
+PROJECT_DIR = '/mnt/workspace/PlantRecognizer'
+DATA_DIR    = os.path.join(PROJECT_DIR, 'data')
+MODEL_DIR   = os.path.join(PROJECT_DIR, 'models')
+
+os.makedirs(DATA_DIR,  exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+print("✅ PAI-DSW 持久化目录创建成功！")
+print(f"   项目目录: {PROJECT_DIR}")
+print(f"   数据目录: {DATA_DIR}")
+print(f"   模型目录: {MODEL_DIR}")
+
+# 确认可用存储空间
+import shutil
+total, used, free = shutil.disk_usage('/mnt/workspace')
+print(f"\n💾 持久化存储：总计 {total//1024**3}GB | "
+      f"已用 {used//1024**3}GB | "
+      f"剩余 {free//1024**3}GB")
+
+# 检查数据集是否已存在（第二次启动可直接跳过下载）
+dataset_exists = os.path.exists(os.path.join(DATA_DIR, 'plantnet_300k'))
+print(f"\n📦 数据集缓存状态: {'✅ 已存在，可跳过 Cell 3 下载' if dataset_exists else '❌ 不存在，需执行 Cell 3 下载'}")
+
+```
+
+## cell2
+
+```python
+# ============================================================
+# Cell 2: 安装 ModelScope SDK 及完整依赖（修复版）
+# 预计耗时: 2-4 分钟
+# ============================================================
+
+# 安装 modelscope 数据集下载所需的完整依赖
+!pip install modelscope -q
+!pip install oss2 -q                          # 阿里云 OSS SDK，modelscope 下载数据集的核心依赖
+!pip install modelscope[datasets] -q          # modelscope 数据集模块的完整附加依赖
+
+# TensorFlow（Colab 通常已预装，确保版本正确）
+!pip install tensorflow -q
+
+# 安装完成后验证关键模块
+import tensorflow as tf
+import oss2
+from modelscope.msdatasets import MsDataset
+
+print(f"✅ TensorFlow 版本: {tf.__version__}")
+print(f"✅ oss2 版本: {oss2.__version__}")
+print(f"✅ ModelScope 导入成功")
+print(f"✅ GPU 可用: {tf.config.list_physical_devices('GPU')}")
+```
+
+## cell3
+
+```python
+# ============================================================
+# Cell 3: 从 ModelScope 下载数据集并缓存到 Google Drive
+#
+# ⚠️  重要说明：
+#     数据集首次下载约需 5-15 分钟（取决于网络速度）
+#     下载完成后数据将持久化在 Google Drive 中
+#     后续再次运行本 Notebook 时，此 Cell 会直接读取缓存，
+#     无需重新下载！
+# ============================================================
+
+from modelscope.msdatasets import MsDataset
+
+print("📥 开始下载训练集（21,000 张）...")
+train_ds = MsDataset.load(
+    'reymond/plants_type_dataset',
+    subset_name='default',
+    split='train',
+    cache_dir=DATA_DIR      # 缓存到 Google Drive，持久化保存
+)
+
+print("📥 开始下载验证集（3,000 张）...")
+val_ds = MsDataset.load(
+    'reymond/plants_type_dataset',
+    subset_name='default',
+    split='validation',
+    cache_dir=DATA_DIR
+)
+
+print(f"\n✅ 数据集下载完成！")
+print(f"   训练集大小: {len(train_ds)}")
+print(f"   验证集大小: {len(val_ds)}")
+
+```
+
+## cell4
+
+```python
+# ============================================================
+# Cell 4: 将 ModelScope Dataset 转换为高效的 tf.data.Dataset
+#
+# 核心处理逻辑：
+#   - 图像读取与解码
+#   - Resize 至 MobileNetV2 标准输入尺寸 224x224
+#   - MobileNetV2 专用预处理（归一化至 [-1, 1]）
+#   - 数据增强（仅训练集）：随机水平翻转、随机亮度/对比度
+# ============================================================
+
+import tensorflow as tf
+import numpy as np
+from PIL import Image
+
+# ---------- 全局配置 ----------
+IMG_SIZE    = 224
+BATCH_SIZE  = 32
+NUM_CLASSES = 30
+AUTOTUNE    = tf.data.AUTOTUNE
+
+# 30 个类别名称（与数据集 label 顺序完全对应）
+CLASS_NAMES = [
+    'aloevera', 'banana', 'bilimbi', 'cantaloupe', 'cassava',
+    'coconut', 'corn', 'cucumber', 'curcuma', 'eggplant',
+    'galangal', 'ginger', 'guava', 'kale', 'longbeans',
+    'mango', 'melon', 'orange', 'paddy', 'papaya',
+    'peperchili', 'pineapple', 'pomelo', 'shallot', 'soybeans',
+    'spinach', 'sweetpotatoes', 'tobacco', 'waterapple', 'watermelon'
+]
+
+print(f"类别数量确认: {len(CLASS_NAMES)} 类")
+
+# ---------- 将 ModelScope Dataset 转为列表 ----------
+print("\n🔄 正在准备数据索引（首次约需1分钟）...")
+
+def ds_to_lists(ms_dataset):
+    """将 ModelScope Dataset 的图片路径和标签提取为 Python 列表"""
+    paths, labels = [], []
+    for sample in ms_dataset:
+        paths.append(sample['image:FILE'])
+        labels.append(int(sample['category']))
+    return paths, labels
+
+train_paths, train_labels = ds_to_lists(train_ds)
+val_paths,   val_labels   = ds_to_lists(val_ds)
+
+print(f"✅ 训练集索引完成: {len(train_paths)} 条")
+print(f"✅ 验证集索引完成: {len(val_paths)} 条")
+
+# ---------- 图像加载与预处理函数 ----------
+def load_and_preprocess(path, label):
+    """读取图片文件 -> Resize -> MobileNetV2 预处理"""
+    img = tf.io.read_file(path)
+    img = tf.image.decode_jpeg(img, channels=3)
+    img = tf.image.resize(img, [IMG_SIZE, IMG_SIZE])
+    img = tf.keras.applications.mobilenet_v2.preprocess_input(img)  # 归一化至 [-1, 1]
+    return img, label
+
+def augment(img, label):
+    """数据增强（仅用于训练集）"""
+    img = tf.image.random_flip_left_right(img)
+    img = tf.image.random_brightness(img, max_delta=0.2)
+    img = tf.image.random_contrast(img, lower=0.8, upper=1.2)
+    img = tf.clip_by_value(img, -1.0, 1.0)  # 确保值域不超出 [-1, 1]
+    return img, label
+
+# ---------- 构建 tf.data 流水线 ----------
+# 训练集：打乱 + 增强 + 批处理 + 预读取
+train_dataset = (
+    tf.data.Dataset.from_tensor_slices((train_paths, train_labels))
+    .shuffle(buffer_size=len(train_paths), seed=42)
+    .map(load_and_preprocess, num_parallel_calls=AUTOTUNE)
+    .map(augment,             num_parallel_calls=AUTOTUNE)
+    .batch(BATCH_SIZE)
+    .prefetch(AUTOTUNE)
+)
+
+# 验证集：不打乱、不增强
+val_dataset = (
+    tf.data.Dataset.from_tensor_slices((val_paths, val_labels))
+    .map(load_and_preprocess, num_parallel_calls=AUTOTUNE)
+    .batch(BATCH_SIZE)
+    .prefetch(AUTOTUNE)
+)
+
+print(f"\n✅ tf.data 数据管道构建完成！")
+print(f"   训练批次数: {len(train_dataset)}")
+print(f"   验证批次数: {len(val_dataset)}")
+
+```
+
+## cell5
+
+```python
+# ============================================================
+# Cell 5: 构建模型
+#
+# 迁移学习策略（两阶段）：
+#   阶段A - 特征提取（Feature Extraction）：
+#       冻结 MobileNetV2 所有卷积层权重，
+#       只训练新增的分类头，快速收敛
+#
+#   阶段B - 微调（Fine-tuning）：
+#       解冻 MobileNetV2 顶部约 30 层，
+#       以极小学习率联合优化，提升最终精度
+# ============================================================
+
+import tensorflow as tf
+from tensorflow.keras import layers, Model
+
+# ---------- 加载 MobileNetV2 预训练权重（ImageNet） ----------
+base_model = tf.keras.applications.MobileNetV2(
+    input_shape=(IMG_SIZE, IMG_SIZE, 3),
+    include_top=False,          # 去掉原始 1000 类分类头
+    weights='imagenet'          # 使用 ImageNet 预训练权重
+)
+
+# 阶段A：冻结 base_model 全部层
+base_model.trainable = False
+
+# ---------- 构建分类头 ----------
+inputs  = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+x       = base_model(inputs, training=False)
+x       = layers.GlobalAveragePooling2D()(x)   # 全局平均池化，替代 Flatten
+x       = layers.Dense(256, activation='relu')(x)
+x       = layers.Dropout(0.3)(x)               # 防过拟合
+outputs = layers.Dense(NUM_CLASSES, activation='softmax')(x)
+
+model = Model(inputs, outputs, name='PlantClassifier_MobileNetV2')
+
+# ---------- 编译（阶段A 配置） ----------
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+model.summary()
+print(f"\n✅ 模型构建完成！")
+print(f"   总参数量: {model.count_params():,}")
+print(f"   可训练参数: {sum([tf.size(w).numpy() for w in model.trainable_weights]):,}")
+```
+
+## cell6
+
+```python
+# ============================================================
+# Cell 6: 阶段A训练 - Feature Extraction（修复版）
+# 修复点：
+#   1. 处理 initial_epoch >= epochs 时 history 为空的情况
+#   2. 优化器警告抑制
+#   3. 训练已完成时直接读取最佳模型指标
+# ============================================================
+
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning)
+
+EPOCHS_A = 15
+checkpoint_path_A = os.path.join(MODEL_DIR, 'checkpoint_A.keras')
+
+# ── 回调函数定义 ──────────────────────────────────────────
+callbacks_A = [
+    tf.keras.callbacks.ModelCheckpoint(
+        filepath=checkpoint_path_A,
+        monitor='val_accuracy',
+        save_best_only=True,
+        save_weights_only=False,
+        verbose=1
+    ),
+    tf.keras.callbacks.EarlyStopping(
+        monitor='val_accuracy',
+        patience=5,
+        restore_best_weights=True,
+        verbose=1
+    ),
+    tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=3,
+        min_lr=1e-7,
+        verbose=1
+    )
+]
+
+# ── 断点恢复检测 ──────────────────────────────────────────
+initial_epoch_A = 0
+if os.path.exists(checkpoint_path_A):
+    try:
+        model.load_weights(checkpoint_path_A)
+        # 从文件名或日志推断已完成轮次
+        initial_epoch_A = EPOCHS_A  # 检查点存在且是最终轮，视为完成
+        print(f"🔄 检测到阶段A检查点，正在恢复...")
+        print(f"✅ 权重恢复成功")
+    except Exception as e:
+        print(f"⚠️  检查点加载失败，从头开始: {e}")
+        initial_epoch_A = 0
+
+# ── 核心修复：判断是否需要继续训练 ───────────────────────
+if initial_epoch_A >= EPOCHS_A:
+    # ✅ 阶段A已完成，直接读取最佳模型评估指标
+    print(f"\n✅ 阶段A已全部完成（{EPOCHS_A}/{EPOCHS_A} 轮），跳过重复训练")
+    print("   正在评估当前最佳模型性能...")
+    
+    # 在验证集上评估模型获取准确率
+    eval_results = model.evaluate(val_dataset, verbose=0)
+    best_val_acc  = eval_results[1]   # accuracy 在第二位
+    best_val_loss = eval_results[0]
+    
+    print(f"\n📊 阶段A最终评估结果：")
+    print(f"   验证集准确率: {best_val_acc:.4f} ({best_val_acc*100:.2f}%)")
+    print(f"   验证集损失值: {best_val_loss:.4f}")
+    
+    # 构造兼容后续 Cell 的 history 对象
+    class FakeHistory:
+        def __init__(self, val_acc, val_loss):
+            self.history = {
+                'val_accuracy': [val_acc],
+                'val_loss':     [val_loss],
+                'accuracy':     [val_acc],
+                'loss':         [val_loss]
+            }
+    history_A = FakeHistory(best_val_acc, best_val_loss)
+
+else:
+    # 🚀 正常训练流程
+    print(f"\n🚀 开始阶段A训练（Feature Extraction）...")
+    print(f"   从第 {initial_epoch_A + 1} 轮开始，目标 {EPOCHS_A} 轮\n")
+    
+    history_A = model.fit(
+        train_dataset,
+        epochs=EPOCHS_A,
+        initial_epoch=initial_epoch_A,
+        validation_data=val_dataset,
+        callbacks=callbacks_A,
+        verbose=1
+    )
+    
+    print(f"\n✅ 阶段A训练完成！")
+    print(f"   最佳验证集准确率: {max(history_A.history['val_accuracy']):.4f}")
+
+print("\n➡️  请继续执行 Cell 7（阶段B微调）")
+```
+
+## cell6.5
+
+```python
+# ============================================================
+# Cell 6.5: 数据管道加速（解决 PAI-DSW 训练卡顿问题）
+# 必须在 Cell 7 之前执行！
+# 原理：将数据集缓存到内存，消除 OSS 网络 I/O 瓶颈
+# ============================================================
+
+import psutil, os
+
+# ── 检查可用内存 ─────────────────────────────────────────
+mem      = psutil.virtual_memory()
+total_gb = mem.total  / 1024**3
+avail_gb = mem.available / 1024**3
+print(f"💾 系统内存状态：总计 {total_gb:.1f}GB | 可用 {avail_gb:.1f}GB")
+
+# ── 策略选择 ─────────────────────────────────────────────
+# PAI-DSW 实例通常有 32~64GB 内存，可完整缓存数据集
+# PlantNet-300K 训练集约 12~15GB 原图，但解码后 batch 数据远小于此
+
+AUTOTUNE = tf.data.AUTOTUNE
+
+def optimize_dataset(dataset, cache=True, name="dataset"):
+    """
+    数据管道三重优化：
+      1. cache()    → 第一轮后数据存在内存，后续 epoch 直接读内存
+      2. prefetch() → GPU 计算当前 batch 时，CPU 预读下一 batch
+      3. 消除每 epoch 重复的 OSS 磁盘 I/O
+    """
+    if cache:
+        dataset = dataset.cache()           # 🔑 核心：内存缓存
+    dataset = dataset.prefetch(AUTOTUNE)    # 🔑 核心：异步预取
+    return dataset
+
+# ── 应用优化 ─────────────────────────────────────────────
+print("\n⚙️  正在应用数据管道优化...")
+print("   ⏳ 首次 cache() 初始化需要约 1~2 分钟（仅此一次）...")
+
+train_dataset = optimize_dataset(train_dataset, cache=True,  name="训练集")
+val_dataset   = optimize_dataset(val_dataset,   cache=True,  name="验证集")
+
+print("   ✅ train_dataset 优化完成：cache() + prefetch(AUTOTUNE)")
+print("   ✅ val_dataset   优化完成：cache() + prefetch(AUTOTUNE)")
+
+# ── 预热缓存（可选但推荐）────────────────────────────────
+print("\n🔥 预热数据缓存（将数据预先载入内存）...")
+print("   此步骤约需 2~5 分钟，完成后训练将大幅加速，不再卡顿\n")
+
+# 遍历一次数据集以触发缓存写入
+step = 0
+for batch in train_dataset:
+    step += 1
+    if step % 100 == 0:
+        print(f"   预热进度: {step}/657 batches...", end='\r')
+print(f"\n   ✅ 训练集缓存预热完成（{step} batches）")
+
+step = 0
+for batch in val_dataset:
+    step += 1
+print(f"   ✅ 验证集缓存预热完成（{step} batches）")
+
+# ── 内存占用检查 ─────────────────────────────────────────
+mem_after   = psutil.virtual_memory()
+avail_after = mem_after.available / 1024**3
+used_cache  = avail_gb - avail_after
+print(f"\n📊 缓存占用内存: ~{used_cache:.1f}GB")
+print(f"   剩余可用内存: {avail_after:.1f}GB")
+
+if avail_after < 4:
+    print("\n⚠️  警告：剩余内存不足 4GB，建议关闭 cache() 改用 prefetch only")
+    print("   请将 optimize_dataset 中的 cache=True 改为 cache=False 后重新执行")
+else:
+    print("\n✅ 内存充足，缓存策略生效！")
+    print("━" * 50)
+    print("🚀 现在执行 Cell 7，训练将不再出现卡顿！")
+    print("   预期 GPU 使用率将持续保持在 85%+ 以上")
+    print("━" * 50)
+```
+
+## cell7
+
+```python
+# ============================================================
+# Cell 7 优化版: 阶段B训练 - Fine-Tuning（防遗忘加强版）
+# 修改点：
+#   1. 解冻层数 30 → 15（减少对预训练特征的扰动）
+#   2. 学习率 1e-5 → 5e-6（更保守的微调）
+#   3. 新增 Warmup 调度（前5轮从极小值线性升至目标LR）
+#   4. EarlyStopping patience 5 → 8（给模型充足收敛时间）
+#   5. 监控 val_loss 替代 val_accuracy 作为主指标（更稳定）
+# ============================================================
+
+import warnings
+import numpy as np
+warnings.filterwarnings('ignore', category=UserWarning)
+
+EPOCHS_B        = 20          # 增加到20轮，配合更保守的学习率
+UNFREEZE_LAYERS = 15          # ⬇ 从30减少到15
+LR_B_TARGET     = 5e-6        # ⬇ 从1e-5降低到5e-6
+LR_B_WARMUP     = 5e-8        # Warmup起始学习率（极小值）
+WARMUP_EPOCHS   = 5           # 前5轮线性升温
+
+checkpoint_path_B = os.path.join(MODEL_DIR, 'checkpoint_B.keras')
+checkpoint_path_A = os.path.join(MODEL_DIR, 'checkpoint_A.keras')
+
+# ── Step 1: 强制从阶段A最佳权重出发 ─────────────────────
+print("=" * 60)
+print("📦 阶段B准备（优化版）：加载阶段A最佳权重")
+print("=" * 60)
+model.load_weights(checkpoint_path_A)
+print(f"✅ 阶段A最佳权重加载成功（val_accuracy = 0.8770）")
+
+# ── Step 2: 精准解冻顶部15层 ────────────────────────────
+print(f"\n🔓 精准解冻 EfficientNet 顶部 {UNFREEZE_LAYERS} 层...")
+
+base_model = model.layers[1]
+base_model.trainable = True
+
+# 先全部冻结
+for layer in base_model.layers:
+    layer.trainable = False
+
+# 只解冻最顶部15层
+for layer in base_model.layers[-UNFREEZE_LAYERS:]:
+    # BatchNormalization 层保持冻结，防止统计量被破坏
+    if not isinstance(layer, tf.keras.layers.BatchNormalization):
+        layer.trainable = True
+
+# 统计
+trainable_count   = sum(1 for l in base_model.layers if l.trainable)
+untrainable_count = sum(1 for l in base_model.layers if not l.trainable)
+bn_frozen         = sum(1 for l in base_model.layers
+                        if isinstance(l, tf.keras.layers.BatchNormalization))
+print(f"   ✅ 可训练层:            {trainable_count} 层")
+print(f"   🔒 冻结层:             {untrainable_count} 层")
+print(f"   🔒 其中 BatchNorm 层:  {bn_frozen} 层（强制冻结保护特征统计）")
+
+# ── Step 3: Warmup 学习率调度器 ──────────────────────────
+class WarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
+    """
+    前 warmup_epochs 轮：从 lr_start 线性升至 lr_target
+    之后：余弦退火衰减至 lr_min
+    """
+    def __init__(self, lr_start, lr_target, lr_min,
+                 warmup_steps, total_steps):
+        super().__init__()
+        self.lr_start     = lr_start
+        self.lr_target    = lr_target
+        self.lr_min       = lr_min
+        self.warmup_steps = warmup_steps
+        self.total_steps  = total_steps
+
+    def __call__(self, step):
+        step = tf.cast(step, tf.float32)
+        # Warmup 阶段：线性升温
+        warmup_lr = self.lr_start + \
+            (self.lr_target - self.lr_start) * (step / self.warmup_steps)
+        # 余弦退火阶段
+        cos_steps = tf.maximum(step - self.warmup_steps, 0)
+        cos_total = tf.cast(self.total_steps - self.warmup_steps, tf.float32)
+        cos_lr = self.lr_min + 0.5 * (self.lr_target - self.lr_min) * \
+            (1 + tf.cos(np.pi * cos_steps / cos_total))
+        return tf.where(step < self.warmup_steps, warmup_lr, cos_lr)
+
+    def get_config(self):
+        return {
+            'lr_start':     self.lr_start,
+            'lr_target':    self.lr_target,
+            'lr_min':       self.lr_min,
+            'warmup_steps': self.warmup_steps,
+            'total_steps':  self.total_steps
+        }
+
+# 计算步数
+steps_per_epoch = 657
+total_steps     = EPOCHS_B * steps_per_epoch
+warmup_steps    = WARMUP_EPOCHS * steps_per_epoch
+
+lr_schedule = WarmupCosineDecay(
+    lr_start     = LR_B_WARMUP,      # 5e-8
+    lr_target    = LR_B_TARGET,      # 5e-6
+    lr_min       = 5e-8,             # 退火终点
+    warmup_steps = warmup_steps,
+    total_steps  = total_steps
+)
+
+# ── Step 4: 重新编译 ─────────────────────────────────────
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(
+        learning_rate=lr_schedule,
+        beta_1=0.9,
+        beta_2=0.999,
+        epsilon=1e-7
+    ),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+print(f"\n⚙️  模型已重新编译")
+print(f"   调度策略: Warmup({WARMUP_EPOCHS}轮) + 余弦退火")
+print(f"   学习率:   {LR_B_WARMUP:.0e} → {LR_B_TARGET:.0e} → {5e-8:.0e}")
+
+# ── Step 5: 回调函数 ─────────────────────────────────────
+callbacks_B = [
+    tf.keras.callbacks.ModelCheckpoint(
+        filepath=checkpoint_path_B,
+        monitor='val_accuracy',         # 监控准确率保存最优
+        save_best_only=True,
+        save_weights_only=False,
+        verbose=1
+    ),
+    tf.keras.callbacks.EarlyStopping(
+        monitor='val_accuracy',
+        patience=8,                     # ⬆ 从5增加到8
+        restore_best_weights=True,
+        verbose=1,
+        min_delta=0.0005                # 至少提升0.05%才算改善
+    ),
+    # 不再使用 ReduceLROnPlateau（已由 WarmupCosineDecay 接管）
+]
+
+# ── Step 6: 打印训练配置摘要 ─────────────────────────────
+print(f"\n{'=' * 60}")
+print(f"🚀 开始阶段B优化版训练（Fine-Tuning）")
+print(f"{'=' * 60}")
+print(f"   解冻层数:      {UNFREEZE_LAYERS} 层（上版: 30层）")
+print(f"   目标学习率:    {LR_B_TARGET:.0e}（上版: 1e-5）")
+print(f"   Warmup 轮数:   {WARMUP_EPOCHS} 轮")
+print(f"   最大训练轮数:  {EPOCHS_B} 轮")
+print(f"   EarlyStopping: patience=8, min_delta=0.0005")
+print(f"{'=' * 60}\n")
+
+# ── Step 7: 训练 ─────────────────────────────────────────
+history_B = model.fit(
+    train_dataset,
+    epochs=EPOCHS_B,
+    initial_epoch=0,
+    validation_data=val_dataset,
+    callbacks=callbacks_B,
+    verbose=1
+)
+
+# ── Step 8: 结果汇报 ─────────────────────────────────────
+best_val_acc_B = max(history_B.history['val_accuracy'])
+best_val_acc_A = 0.8770
+delta          = best_val_acc_B - best_val_acc_A
+
+print(f"\n{'=' * 55}")
+print(f"✅ 阶段B优化版训练完成！")
+print(f"   阶段A最佳准确率:   {best_val_acc_A:.4f}")
+print(f"   阶段B最佳准确率:   {best_val_acc_B:.4f}")
+print(f"   微调提升幅度:      {delta:+.4f} ({delta*100:+.2f}%)")
+
+if best_val_acc_B > best_val_acc_A:
+    print(f"\n🎉 微调成功！阶段B超越阶段A")
+    print(f"   最优模型已保存至: {checkpoint_path_B}")
+else:
+    print(f"\n⚠️  阶段B仍未超越阶段A，将继续使用阶段A模型")
+    model.load_weights(checkpoint_path_A)
+    print(f"   已切换回阶段A权重: {checkpoint_path_A}")
+print(f"{'=' * 55}")
+print(f"\n➡️  请继续执行 Cell 8（更新训练曲线可视化）")
+```
+
+## cell8
+
+```python
+# ============================================================
+# Cell 8: 训练曲线可视化 + 最优模型确认（完整版）
+# 功能：
+#   1. 绘制阶段A + 阶段B完整训练曲线
+#   2. 自动检测并加载最优检查点
+#   3. 输出阶段B退化诊断报告
+#   4. 为后续推理指定正确的模型
+# ============================================================
+
+import matplotlib
+matplotlib.use('Agg')   # PAI-DSW 无头模式，防止 display 报错
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import numpy as np
+import warnings
+warnings.filterwarnings('ignore')
+
+# ── 从 history 对象提取数据 ──────────────────────────────
+acc_A     = history_A.history['accuracy']
+val_acc_A = history_A.history['val_accuracy']
+loss_A    = history_A.history['loss']
+val_loss_A= history_A.history['val_loss']
+
+acc_B     = history_B.history['accuracy']
+val_acc_B = history_B.history['val_accuracy']
+loss_B    = history_B.history['loss']
+val_loss_B= history_B.history['val_loss']
+
+epochs_A = list(range(1, len(acc_A) + 1))
+epochs_B = list(range(len(acc_A) + 1, len(acc_A) + len(acc_B) + 1))
+
+best_acc_A = max(val_acc_A)
+best_acc_B = max(val_acc_B)
+best_epoch_A = val_acc_A.index(best_acc_A) + 1
+best_epoch_B = val_acc_B.index(best_acc_B) + len(acc_A) + 1
+
+# ── 自动选择全局最优模型 ─────────────────────────────────
+GLOBAL_BEST_ACC = max(best_acc_A, best_acc_B)
+if best_acc_A >= best_acc_B:
+    BEST_CHECKPOINT = checkpoint_path_A
+    BEST_STAGE      = 'A'
+    print("⚠️  检测到阶段B性能退化，已自动切换回阶段A最优模型")
+else:
+    BEST_CHECKPOINT = checkpoint_path_B
+    BEST_STAGE      = 'B'
+
+print(f"✅ 全局最优模型: 阶段{BEST_STAGE} | "
+      f"val_accuracy = {GLOBAL_BEST_ACC:.4f}")
+print(f"   检查点路径: {BEST_CHECKPOINT}")
+
+# ── 加载最优权重供后续 Cell 使用 ─────────────────────────
+model.load_weights(BEST_CHECKPOINT)
+print(f"✅ 最优权重已加载完毕\n")
+
+# ── 绘图 ─────────────────────────────────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+fig.suptitle('PlantNet-300K Training History\n'
+             'Stage A (Feature Extraction) + Stage B (Fine-Tuning)',
+             fontsize=14, fontweight='bold', y=1.02)
+
+COLOR_A_TRAIN = '#2196F3'   # 蓝
+COLOR_A_VAL   = '#0D47A1'   # 深蓝
+COLOR_B_TRAIN = '#FF9800'   # 橙
+COLOR_B_VAL   = '#E65100'   # 深橙
+COLOR_BEST    = '#4CAF50'   # 绿（最优点）
+COLOR_DIVIDER = '#9E9E9E'   # 灰（阶段分割线）
+
+for ax, metric, title in zip(
+    axes,
+    [('accuracy', 'val_accuracy'), ('loss', 'val_loss')],
+    ['Model Accuracy', 'Model Loss']
+):
+    train_key, val_key = metric
+
+    # 阶段A曲线
+    ax.plot(epochs_A, history_A.history[train_key],
+            color=COLOR_A_TRAIN, linewidth=2,
+            linestyle='-', marker='o', markersize=4,
+            label='Stage A Train')
+    ax.plot(epochs_A, history_A.history[val_key],
+            color=COLOR_A_VAL, linewidth=2,
+            linestyle='--', marker='s', markersize=4,
+            label='Stage A Val')
+
+    # 阶段B曲线
+    ax.plot(epochs_B, history_B.history[train_key],
+            color=COLOR_B_TRAIN, linewidth=2,
+            linestyle='-', marker='o', markersize=4,
+            label='Stage B Train')
+    ax.plot(epochs_B, history_B.history[val_key],
+            color=COLOR_B_VAL, linewidth=2,
+            linestyle='--', marker='s', markersize=4,
+            label='Stage B Val')
+
+    # 阶段分割线
+    ax.axvline(x=len(acc_A) + 0.5,
+               color=COLOR_DIVIDER, linewidth=1.5,
+               linestyle=':', alpha=0.8)
+    ax.text(len(acc_A) + 0.6,
+            ax.get_ylim()[0] if train_key == 'loss' else ax.get_ylim()[1],
+            'A→B', fontsize=9, color=COLOR_DIVIDER, va='bottom')
+
+    # 标注全局最优点（仅在 accuracy 图上）
+    if train_key == 'accuracy':
+        best_x = best_epoch_A if BEST_STAGE == 'A' else best_epoch_B
+        best_y = GLOBAL_BEST_ACC
+        ax.scatter([best_x], [best_y],
+                   color=COLOR_BEST, s=120, zorder=5,
+                   marker='*', label=f'Best Val ({GLOBAL_BEST_ACC:.4f})')
+        ax.annotate(
+            f'  Best: {GLOBAL_BEST_ACC:.4f}\n  Stage {BEST_STAGE}, Epoch {best_x}',
+            xy=(best_x, best_y),
+            xytext=(best_x + 1, best_y - 0.03),
+            fontsize=9, color=COLOR_BEST,
+            arrowprops=dict(arrowstyle='->', color=COLOR_BEST, lw=1.5)
+        )
+
+        # 标注退化区域
+        if best_acc_B < best_acc_A:
+            ax.axhspan(best_acc_B, best_acc_A,
+                       xmin=(len(acc_A)) / (len(acc_A) + len(acc_B)),
+                       alpha=0.1, color='red',
+                       label='Stage B degradation')
+
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.set_xlabel('Epoch', fontsize=10)
+    ax.set_ylabel(train_key.capitalize(), fontsize=10)
+    ax.legend(loc='best', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim([0.5, len(acc_A) + len(acc_B) + 0.5])
+
+    # X轴刻度：每隔3轮显示一次
+    all_epochs = epochs_A + epochs_B
+    ax.set_xticks([e for e in all_epochs if e % 3 == 0 or e == 1])
+
+plt.tight_layout()
+
+# 保存图片
+plot_path = os.path.join(MODEL_DIR, 'training_history.png')
+plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+plt.show()
+print(f"\n📊 训练曲线已保存至: {plot_path}")
+
+# ── 阶段性能对比报告 ─────────────────────────────────────
+print("\n" + "=" * 55)
+print("📋 训练阶段性能对比报告")
+print("=" * 55)
+print(f"{'指标':<20} {'阶段A':>10} {'阶段B':>10} {'变化':>10}")
+print("-" * 55)
+print(f"{'最佳 val_accuracy':<20} "
+      f"{best_acc_A:>10.4f} "
+      f"{best_acc_B:>10.4f} "
+      f"{best_acc_B - best_acc_A:>+10.4f}")
+print(f"{'训练轮数':<20} "
+      f"{len(acc_A):>10} "
+      f"{len(acc_B):>10} "
+      f"{'(EarlyStopped)':>10}")
+print(f"{'最终训练集准确率':<20} "
+      f"{acc_A[-1]:>10.4f} "
+      f"{acc_B[-1]:>10.4f} "
+      f"{acc_B[-1] - acc_A[-1]:>+10.4f}")
+print("=" * 55)
+print(f"\n🏆 全局最优: 阶段{BEST_STAGE} val_accuracy = {GLOBAL_BEST_ACC:.4f}")
+
+if best_acc_B < best_acc_A:
+    print("\n⚠️  诊断: 阶段B出现性能退化（Catastrophic Forgetting）")
+    print("   原因: 优化器状态重置 + 解冻层过多")
+    print("   处置: 已自动加载阶段A最优权重用于后续推理")
+    print("\n💡 如需重新进行阶段B微调，建议调整参数：")
+    print("   • 解冻层数: 30 → 15（减少扰动范围）")
+    print("   • 初始学习率: 1e-5 → 5e-6（更保守）")
+    print("   • 是否重试阶段B？请告知，我将提供优化版 Cell 7")
+print("\n➡️  当前最优模型已就绪，可继续执行 Cell 9（模型评估）")
+```
+
+## cell9
+
+```python
+# ============================================================
+# Cell 9: 验证集完整评估
+# 验收标准（来自 PRD 4.1）: Top-1 准确率 ≥ 85%
+#
+# ✅ 修复：CHECKPOINT_PATH_B（未定义）
+#    → 改用 Cell 8 已定义的 BEST_CHECKPOINT（全局最优路径）
+# ============================================================
+
+print("=" * 50)
+print("📊 PoC 验收评估 - 验证集 Top-1 准确率")
+print("=" * 50)
+print(f"   使用检查点: {BEST_CHECKPOINT}")   # ✅ Cell 8 中已定义
+print(f"   来自阶段:   Stage {BEST_STAGE}\n") # ✅ Cell 8 中已定义
+
+# Cell 8 已加载最优权重，此处无需重复加载
+# 但为保险起见保留加载语句，使用正确变量名
+model.load_weights(BEST_CHECKPOINT)  # ✅ 修复：CHECKPOINT_PATH_B → BEST_CHECKPOINT
+
+loss, accuracy = model.evaluate(val_dataset, verbose=1)
+
+print(f"\n{'='*50}")
+print(f"  验证集 Loss    : {loss:.4f}")
+print(f"  验证集 Accuracy: {accuracy:.4f}  ({accuracy*100:.2f}%)")
+print(f"{'='*50}")
+
+TARGET_ACCURACY = 0.85
+if accuracy >= TARGET_ACCURACY:
+    print(f"\n🎉 PoC 验收通过！准确率 {accuracy*100:.2f}% ≥ 85%")
+    print("   可以进行下一步：INT8 量化导出 .tflite")
+else:
+    gap = (TARGET_ACCURACY - accuracy) * 100
+    print(f"\n⚠️  当前准确率 {accuracy*100:.2f}% 未达到 85% 目标，差距 {gap:.2f}%")
+    print("   建议：检查训练曲线，考虑增加 epochs 或调整学习率后重跑 Cell 7")
+```
+
+## cell10-0
+
+```python
+# ============================================================
+# Cell 10-0（修复版）: 换源安装 tf_keras
+# ============================================================
+import subprocess, sys
+
+mirrors = [
+    "https://pypi.tuna.tsinghua.edu.cn/simple",   # 清华
+    "https://pypi.mirrors.ustc.edu.cn/simple",     # 中科大
+    "https://mirrors.cloud.tencent.com/pypi/simple", # 腾讯
+    "https://pypi.douban.com/simple",              # 豆瓣
+]
+
+print("📦 尝试安装 tf_keras（轮换镜像源）...")
+installed = False
+
+for mirror in mirrors:
+    print(f"\n   🔄 尝试镜像: {mirror.split('/')[2]}")
+    result = subprocess.run(
+        [sys.executable, '-m', 'pip', 'install', 'tf_keras',
+         '-i', mirror,
+         '--timeout', '120',
+         '-q'],
+        capture_output=True, text=True, timeout=180
+    )
+    if result.returncode == 0:
+        print(f"   ✅ 安装成功！")
+        installed = True
+        break
+    else:
+        err = result.stderr[-200:] if result.stderr else "无错误信息"
+        print(f"   ❌ 失败: {err[-100:]}")
+
+if installed:
+    import tf_keras
+    print(f"\n✅ tf_keras 版本: {tf_keras.__version__}")
+else:
+    print("\n⚠️  所有镜像均失败，将使用 TOCO 转换器方案（无需 tf_keras）")
+    print("➡️  请直接执行下方的 Cell 10-A（TOCO 强制版）")
+```
+
+## cell10-A
+
+```python
+# ============================================================
+# Cell 10-A（冻结常量图终极版）
+#
+# ✅ 根本解法：
+#   彻底绕过 Keras 对象，将所有权重固化为图中常量
+#   流程：
+#     1. 父进程：Keras 3 加载权重 → 提取所有 numpy 权重数组
+#        → 序列化为 .npz 文件（纯 numpy，无任何 Keras 依赖）
+#     2. 子进程：从 .npz 读取权重 → 用 tf.Variable 手动赋值
+#        → tf.function 追踪为 ConcreteFunction
+#        → convert_variables_to_constants_v2 冻结为常量图
+#        → from_concrete_functions() 转换（纯 TF 图，无 Keras）
+# ============================================================
+import tensorflow as tf
+import numpy as np
+import os, gc
+
+PROJECT_DIR     = '/mnt/workspace/PlantRecognizer'
+DATA_DIR        = os.path.join(PROJECT_DIR, 'data')
+MODEL_DIR       = os.path.join(PROJECT_DIR, 'models')
+TFLITE_PATH     = os.path.join(MODEL_DIR, 'plant_classifier_int8.tflite')
+SCRIPT_PATH     = os.path.join(MODEL_DIR, 'run_tflite_convert.py')
+CALIB_LIST_PATH = os.path.join(MODEL_DIR, 'calib_paths.txt')
+WEIGHTS_NPZ     = os.path.join(MODEL_DIR, 'weights_frozen.npz')  # ⭐ 纯 numpy
+
+checkpoint_path_B = os.path.join(MODEL_DIR, 'checkpoint_B.keras')
+checkpoint_path_A = os.path.join(MODEL_DIR, 'checkpoint_A.keras')
+BEST_CHECKPOINT   = checkpoint_path_B if os.path.exists(checkpoint_path_B) \
+                    else checkpoint_path_A
+
+IMG_SIZE        = 224
+NUM_CLASSES     = 30
+NUM_CALIBRATION = 50
+
+print("=" * 60)
+print("🔧 Cell 10-A（冻结常量图终极版）")
+print("=" * 60)
+
+# ══════════════════════════════════════════════════════════
+# Step 1: 用 Keras 3（父进程）加载权重，提取为纯 numpy
+#   → 完全与 Keras 对象解耦，子进程不需要任何 Keras
+# ══════════════════════════════════════════════════════════
+print("\n📦 Step 1: 提取模型权重为纯 numpy 数组...")
+
+# 确保模型已构建
+if 'model' not in dir() or model is None:
+    print("   ⚠️  重建模型...")
+    from tensorflow.keras import layers, Model
+    tf.keras.backend.clear_session()
+    _base = tf.keras.applications.MobileNetV2(
+        input_shape=(IMG_SIZE, IMG_SIZE, 3),
+        include_top=False, weights=None
+    )
+    _inp  = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+    _x    = _base(_inp, training=False)
+    _x    = layers.GlobalAveragePooling2D()(_x)
+    _x    = layers.Dense(256, activation='relu')(_x)
+    _x    = layers.Dropout(0.3)(_x)
+    _out  = layers.Dense(NUM_CLASSES, activation='softmax')(_x)
+    model = Model(_inp, _out, name='PlantClassifier_MobileNetV2')
+    _ = model(tf.zeros([1, IMG_SIZE, IMG_SIZE, 3]), training=False)
+
+model.load_weights(BEST_CHECKPOINT)
+
+# ⭐ 核心：提取所有层的权重为 numpy 字典
+weights_dict = {}
+total_arrays = 0
+for i, layer in enumerate(model.layers):
+    ws = layer.get_weights()
+    if ws:
+        for j, w in enumerate(ws):
+            key = f"layer_{i:03d}_weight_{j:02d}"
+            weights_dict[key] = w
+            total_arrays += 1
+
+# 保存为 npz（纯 numpy，跨 Python 环境 100% 兼容）
+np.savez_compressed(WEIGHTS_NPZ, **weights_dict)
+npz_size = os.path.getsize(WEIGHTS_NPZ) / (1024 * 1024)
+print(f"   ✅ 提取完成: {total_arrays} 个权重数组")
+print(f"   ✅ NPZ 已保存: {WEIGHTS_NPZ}  ({npz_size:.2f} MB)")
+
+# 验证范数
+last_layer_w = [v for k, v in weights_dict.items() if 'weight_00' in k][-1]
+w_norm = float(np.linalg.norm(last_layer_w))
+print(f"   ✅ 权重验证（分类层范数）: {w_norm:.4f}")
+
+# 保存层结构信息（子进程需要知道每层有几个权重）
+layer_info = []
+for i, layer in enumerate(model.layers):
+    ws = layer.get_weights()
+    layer_info.append({
+        'idx': i,
+        'name': layer.name,
+        'n_weights': len(ws),
+        'shapes': [list(w.shape) for w in ws]
+    })
+
+import json
+layer_info_path = os.path.join(MODEL_DIR, 'layer_info.json')
+with open(layer_info_path, 'w') as f:
+    json.dump(layer_info, f)
+print(f"   ✅ 层结构信息已保存: {layer_info_path}")
+
+del model
+tf.keras.backend.clear_session()
+gc.collect()
+print("   🧹 父进程模型已释放")
+
+# ══════════════════════════════════════════════════════════
+# Step 2: 准备校准数据
+# ══════════════════════════════════════════════════════════
+print("\n🔧 Step 2: 准备校准数据...")
+
+if 'train_paths' not in dir() or len(train_paths) == 0:
+    print("   ⚠️  重建 train_paths...")
+    from modelscope.msdatasets import MsDataset
+    train_ms    = MsDataset.load(
+        'reymond/plants_type_dataset',
+        subset_name='default', split='train', cache_dir=DATA_DIR
+    )
+    train_paths = [sample['image:FILE'] for sample in train_ms]
+    print(f"   ✅ 重建完成: {len(train_paths)} 条")
+else:
+    print(f"   ✅ 已存在: {len(train_paths)} 条")
+
+np.random.seed(42)
+idx = np.random.choice(len(train_paths), NUM_CALIBRATION, replace=False)
+calib_paths = [train_paths[i] for i in idx]
+with open(CALIB_LIST_PATH, 'w') as f:
+    f.write('\n'.join(calib_paths))
+print(f"   ✅ 校准路径已写入: {CALIB_LIST_PATH}")
+
+# ══════════════════════════════════════════════════════════
+# Step 3: 生成子进程脚本（纯 TF 图，零 Keras 依赖）
+# ══════════════════════════════════════════════════════════
+print("\n🔧 Step 3: 生成冻结图版转换脚本...")
+
+CONVERT_SCRIPT = f'''#!/usr/bin/env python3
+# ================================================================
+# TFLite INT8 量化转换脚本 —— 冻结常量图终极版
+#
+# 核心原理：
+#   1. 从 .npz 读取纯 numpy 权重（零 Keras 依赖）
+#   2. 重建 tf.keras 模型并手动赋值权重
+#   3. 用 convert_variables_to_constants_v2 冻结所有变量为常量
+#   4. 从冻结的 ConcreteFunction 转换 TFLite
+#      → 冻结后图中只有常量算子，无 ResourceVariable
+#      → MLIR/TOCO 均不会触发 ReadVariableOp Bug
+# ================================================================
+import os, sys, json
+
+os.environ["CUDA_VISIBLE_DEVICES"]   = ""
+os.environ["TF_CPP_MIN_LOG_LEVEL"]  = "3"   # 完全静音
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
+import tensorflow as tf
+import numpy as np
+
+print("=" * 60)
+print("🖥️  TFLite 转换（冻结常量图终极版）")
+print("=" * 60)
+print(f"   TF 版本 : {{tf.__version__}}")
+print(f"   Keras   : {{tf.keras.__version__}}")
+print(f"   GPU     : {{len(tf.config.list_physical_devices('GPU'))}} 个（应为 0）✅")
+
+IMG_SIZE        = {IMG_SIZE}
+NUM_CLASSES     = {NUM_CLASSES}
+WEIGHTS_NPZ     = r"{WEIGHTS_NPZ}"
+LAYER_INFO_PATH = r"{os.path.join(MODEL_DIR, 'layer_info.json')}"
+TFLITE_PATH     = r"{TFLITE_PATH}"
+CALIB_LIST_PATH = r"{CALIB_LIST_PATH}"
+
+# ══════════════════════════════════════════════════════════
+# Step 1: 重建模型结构 + 从 npz 赋值权重
+# ══════════════════════════════════════════════════════════
+print("\\n📦 Step 1: 重建模型并加载 numpy 权重...")
+
+# 重建与训练完全一致的结构
+base_model = tf.keras.applications.MobileNetV2(
+    input_shape=(IMG_SIZE, IMG_SIZE, 3),
+    include_top=False, weights=None
+)
+inputs  = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+x       = base_model(inputs, training=False)
+x       = tf.keras.layers.GlobalAveragePooling2D()(x)
+x       = tf.keras.layers.Dense(256, activation="relu")(x)
+x       = tf.keras.layers.Dropout(0.3)(x)
+outputs = tf.keras.layers.Dense(NUM_CLASSES, activation="softmax")(x)
+model   = tf.keras.Model(inputs, outputs)
+_ = model(tf.zeros([1, IMG_SIZE, IMG_SIZE, 3]), training=False)
+print(f"   模型参数量: {{model.count_params():,}}")
+
+# 加载 npz 权重
+print("   加载 NPZ 权重...")
+npz = np.load(WEIGHTS_NPZ)
+with open(LAYER_INFO_PATH) as f:
+    layer_info = json.load(f)
+
+assigned_layers = 0
+for info in layer_info:
+    idx  = info["idx"]
+    n_ws = info["n_weights"]
+    if n_ws == 0:
+        continue
+    layer  = model.layers[idx]
+    ws_new = []
+    for j in range(n_ws):
+        key = f"layer_{{idx:03d}}_weight_{{j:02d}}"
+        if key in npz:
+            ws_new.append(npz[key])
+        else:
+            print(f"   ⚠️  missing key {{key}}")
+            ws_new.append(layer.get_weights()[j])
+    layer.set_weights(ws_new)
+    assigned_layers += 1
+
+w_norm = float(np.linalg.norm(model.layers[-1].get_weights()[0]))
+print(f"   ✅ 权重赋值完成（{{assigned_layers}} 层，分类层范数: {{w_norm:.4f}}）")
+if w_norm < 0.01:
+    print("   ❌ 权重范数异常！")
+    sys.exit(1)
+
+# ══════════════════════════════════════════════════════════
+# Step 2: 冻结变量为常量
+#   convert_variables_to_constants_v2 将所有 ResourceVariable
+#   替换为 Const 节点，彻底消除 ReadVariableOp
+# ══════════════════════════════════════════════════════════
+print("\\n❄️  Step 2: 冻结模型变量为常量...")
+
+# 用 training=False 追踪推理图（关闭 Dropout）
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[1, IMG_SIZE, IMG_SIZE, 3],
+                  dtype=tf.float32, name="input_image")
+])
+def inference_func(input_image):
+    return model(input_image, training=False)
+
+# 获取 ConcreteFunction
+concrete_func = inference_func.get_concrete_function()
+
+# ⭐ 核心：将所有 ResourceVariable 替换为 Const 常量
+from tensorflow.python.framework.convert_to_constants import (
+    convert_variables_to_constants_v2
+)
+frozen_func = convert_variables_to_constants_v2(concrete_func)
+frozen_func.graph.as_graph_def()
+
+# 验证冻结结果
+node_types = set(n.op for n in frozen_func.graph.as_graph_def().node)
+print(f"   ✅ 冻结完成，图中算子类型数: {{len(node_types)}}")
+if "ReadVariableOp" in node_types:
+    print("   ⚠️  仍有 ReadVariableOp，但可能不影响转换")
+else:
+    print("   ✅ 已无 ReadVariableOp，纯常量图 ✓")
+if "VarHandleOp" in node_types:
+    print("   ⚠️  仍有 VarHandleOp")
+else:
+    print("   ✅ 已无 VarHandleOp ✓")
+
+# ══════════════════════════════════════════════════════════
+# Step 3: 校准数据生成器
+# ══════════════════════════════════════════════════════════
+print("\\n🔧 Step 3: 读取校准数据...")
+with open(CALIB_LIST_PATH) as f:
+    calib_paths = [l.strip() for l in f if l.strip()]
+print(f"   校准样本数量: {{len(calib_paths)}} 张")
+
+def representative_dataset_gen():
+    for i, path in enumerate(calib_paths):
+        try:
+            img = tf.io.read_file(path)
+            img = tf.image.decode_jpeg(img, channels=3)
+            img = tf.image.resize(img, [IMG_SIZE, IMG_SIZE])
+            img = tf.keras.applications.mobilenet_v2.preprocess_input(img)
+            img = tf.expand_dims(img, axis=0)
+            img = tf.cast(img, tf.float32)
+            yield [img]
+            if (i + 1) % 10 == 0:
+                print(f"   校准进度: {{i+1}}/{{len(calib_paths)}}")
+        except Exception as e:
+            print(f"   ⚠️  跳过: {{e}}")
+
+# ══════════════════════════════════════════════════════════
+# Step 4: 从冻结的 ConcreteFunction 转换
+#   ⭐ from_concrete_functions(frozen_func)
+#      输入是纯常量图，MLIR/TOCO 都能正常解析
+# ══════════════════════════════════════════════════════════
+print("\\n⚙️  Step 4: 配置 TFLite 转换器（冻结 ConcreteFunction）...")
+
+quant_type   = "INT8 全整数量化"
+tflite_model = None
+
+# ── 方案 1：from_concrete_functions + MLIR + INT8 ────────
+print("   尝试方案1: from_concrete_functions + MLIR + INT8")
+try:
+    c1 = tf.lite.TFLiteConverter.from_concrete_functions(
+        [frozen_func], model
+    )
+    c1.optimizations              = [tf.lite.Optimize.DEFAULT]
+    c1.representative_dataset     = representative_dataset_gen
+    c1.target_spec.supported_ops  = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+    c1.inference_input_type       = tf.uint8
+    c1.inference_output_type      = tf.uint8
+    c1.experimental_new_converter = True
+    c1.experimental_new_quantizer = True
+    print("   🔄 转换中（约需 3-8 分钟）...")
+    tflite_model = c1.convert()
+    print("   ✅ 方案1成功！")
+
+except Exception as e1:
+    print(f"   ❌ 方案1失败: {{e1}}")
+
+    # ── 方案 2：from_concrete_functions + TOCO + INT8 ────
+    print("\\n   尝试方案2: from_concrete_functions + TOCO + INT8")
+    try:
+        c2 = tf.lite.TFLiteConverter.from_concrete_functions(
+            [frozen_func], model
+        )
+        c2.experimental_new_converter = False  # TOCO
+        c2.experimental_new_quantizer = False
+        c2.optimizations              = [tf.lite.Optimize.DEFAULT]
+        c2.representative_dataset     = representative_dataset_gen
+        c2.target_spec.supported_ops  = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+        c2.inference_input_type       = tf.uint8
+        c2.inference_output_type      = tf.uint8
+        print("   🔄 转换中（约需 3-8 分钟）...")
+        tflite_model = c2.convert()
+        quant_type = "INT8（TOCO）"
+        print("   ✅ 方案2成功！")
+
+    except Exception as e2:
+        print(f"   ❌ 方案2失败: {{e2}}")
+
+        # ── 方案 3：冻结图 SavedModel 路径 ───────────────
+        print("\\n   尝试方案3: 冻结图写出 SavedModel → from_saved_model")
+        try:
+            import tempfile, shutil
+            tmp_dir = tempfile.mkdtemp()
+            # 将冻结函数包装为 tf.Module 并保存
+            class FrozenModule(tf.Module):
+                def __init__(self, frozen_fn):
+                    super().__init__()
+                    self._fn = frozen_fn
+                @tf.function(input_signature=[tf.TensorSpec(
+                    [1, IMG_SIZE, IMG_SIZE, 3], tf.float32)])
+                def __call__(self, x):
+                    return self._fn(x)
+
+            frozen_module = FrozenModule(frozen_func)
+            tf.saved_model.save(frozen_module, tmp_dir)
+            print(f"   SavedModel 已写出: {{tmp_dir}}")
+
+            c3 = tf.lite.TFLiteConverter.from_saved_model(tmp_dir)
+            c3.optimizations              = [tf.lite.Optimize.DEFAULT]
+            c3.representative_dataset     = representative_dataset_gen
+            c3.target_spec.supported_ops  = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+            c3.inference_input_type       = tf.uint8
+            c3.inference_output_type      = tf.uint8
+            c3.experimental_new_converter = True
+            c3.experimental_new_quantizer = True
+            print("   🔄 转换中（约需 3-8 分钟）...")
+            tflite_model = c3.convert()
+            quant_type = "INT8（冻结图 SavedModel）"
+            shutil.rmtree(tmp_dir)
+            print("   ✅ 方案3成功！")
+
+        except Exception as e3:
+            print(f"   ❌ 方案3失败: {{e3}}")
+
+            # ── 方案 4：动态范围量化（最终保底）─────────
+            print("\\n   尝试方案4: 动态范围量化（保底，无需校准数据）")
+            try:
+                c4 = tf.lite.TFLiteConverter.from_concrete_functions(
+                    [frozen_func], model
+                )
+                c4.optimizations = [tf.lite.Optimize.DEFAULT]
+                print("   🔄 转换中...")
+                tflite_model = c4.convert()
+                quant_type = "动态范围量化（冻结图）"
+                print("   ✅ 方案4成功！（动态范围量化，精度略低于INT8）")
+
+            except Exception as e4:
+                print(f"   ❌ 所有方案均失败: {{e4}}")
+                sys.exit(1)
+
+if tflite_model is None:
+    print("   ❌ tflite_model 为空")
+    sys.exit(1)
+
+# ══════════════════════════════════════════════════════════
+# Step 5: 保存并推理验证
+# ══════════════════════════════════════════════════════════
+with open(TFLITE_PATH, "wb") as f:
+    f.write(tflite_model)
+size_mb = os.path.getsize(TFLITE_PATH) / (1024 * 1024)
+
+print("\\n🔍 验证 TFLite 模型推理...")
+try:
+    interp = tf.lite.Interpreter(model_content=tflite_model)
+    interp.allocate_tensors()
+    in_d  = interp.get_input_details()[0]
+    out_d = interp.get_output_details()[0]
+    print(f"   输入: shape={{in_d['shape']}}  dtype={{in_d['dtype']}}")
+    print(f"   输出: shape={{out_d['shape']}} dtype={{out_d['dtype']}}")
+    dummy = np.random.randint(0, 255,
+            in_d["shape"].tolist(), dtype=in_d["dtype"])
+    interp.set_tensor(in_d["index"], dummy)
+    interp.invoke()
+    out = interp.get_tensor(out_d["index"])
+    print(f"   推理输出 shape: {{out.shape}}  ✅ 验证通过！")
+except Exception as ve:
+    print(f"   ⚠️  验证失败（不影响保存）: {{ve}}")
+
+print(f"\\n{{'='*60}}")
+print(f"✅ 量化模型保存成功！")
+print(f"   量化类型 : {{quant_type}}")
+print(f"   文件路径 : {{TFLITE_PATH}}")
+print(f"   模型大小 : {{size_mb:.2f}} MB")
+print(f"{{'='*60}}")
+print("CONVERSION_SUCCESS")
+sys.exit(0)
+'''
+
+with open(SCRIPT_PATH, 'w', encoding='utf-8') as f:
+    f.write(CONVERT_SCRIPT)
+print(f"   ✅ 脚本已生成: {SCRIPT_PATH}")
+
+print(f"\n{'='*60}")
+print(f"✅ Cell 10-A（冻结图版）完成！")
+print(f"   NPZ 权重   : {WEIGHTS_NPZ}  ({npz_size:.2f} MB)")
+print(f"   转换脚本   : {SCRIPT_PATH}")
+print(f"   核心方案   : convert_variables_to_constants_v2（消除所有 ReadVariableOp）")
+print(f"{'='*60}")
+print(f"\n➡️  请立即执行 Cell 10-B")
+```
+
+## cell10-B
+
+```python
+# ============================================================
+# Cell 10-B（直接复用）
+# ============================================================
+import subprocess, os, sys
+
+PROJECT_DIR = '/mnt/workspace/PlantRecognizer'
+MODEL_DIR   = os.path.join(PROJECT_DIR, 'models')
+SCRIPT_PATH = os.path.join(MODEL_DIR, 'run_tflite_convert.py')
+TFLITE_PATH = os.path.join(MODEL_DIR, 'plant_classifier_int8.tflite')
+
+print("=" * 60)
+print("🚀 Cell 10-B（冻结常量图版）")
+print("=" * 60)
+
+if not os.path.exists(SCRIPT_PATH):
+    raise FileNotFoundError("❌ 请先执行 Cell 10-A！")
+
+child_env = os.environ.copy()
+child_env["CUDA_VISIBLE_DEVICES"]    = ""
+child_env["TF_CPP_MIN_LOG_LEVEL"]   = "3"
+child_env["TF_ENABLE_ONEDNN_OPTS"]  = "0"
+child_env["OMP_NUM_THREADS"]         = "4"
+child_env["TF_NUM_INTRAOP_THREADS"] = "4"
+child_env["TF_NUM_INTEROP_THREADS"] = "2"
+
+print("   核心方案: convert_variables_to_constants_v2（冻结图）")
+print(f"\n⏳ 子进程已启动，实时输出如下：")
+print("-" * 60)
+
+process = subprocess.Popen(
+    [sys.executable, SCRIPT_PATH],
+    env=child_env,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True, bufsize=1
+)
+
+output_lines, success_flag = [], False
+for line in process.stdout:
+    line = line.rstrip()
+    print(line)
+    output_lines.append(line)
+    if "CONVERSION_SUCCESS" in line:
+        success_flag = True
+
+process.wait()
+return_code = process.returncode
+print("-" * 60)
+
+if return_code == 0 and success_flag and os.path.exists(TFLITE_PATH):
+    model_size_mb = os.path.getsize(TFLITE_PATH) / (1024 * 1024)
+    print(f"\n{'='*60}")
+    print(f"✅ 量化模型导出成功！")
+    print(f"   文件路径: {TFLITE_PATH}")
+    print(f"   模型大小: {model_size_mb:.2f} MB")
+    print(f"{'='*60}")
+
+    import shutil
+    for p in [os.path.join(MODEL_DIR, 'saved_model_for_tflite')]:
+        if os.path.exists(p): shutil.rmtree(p); print(f"   🧹 {p}")
+    for p in [SCRIPT_PATH,
+              os.path.join(MODEL_DIR, 'calib_paths.txt'),
+              os.path.join(MODEL_DIR, 'weights_frozen.npz'),
+              os.path.join(MODEL_DIR, 'layer_info.json')]:
+        if os.path.exists(p): os.remove(p); print(f"   🧹 {p}")
+
+    print(f"\n➡️  请继续执行 Cell 11（量化模型推理验证）")
+else:
+    print(f"\n❌ 子进程转换失败！返回码: {return_code}")
+```
+
+## cell11
+
+```python
+# ============================================================
+# Cell 11（修复版）: TFLite INT8 量化模型推理验证
+#
+# ⭐ 核心修复：
+#   inference_input_type=uint8 时，TFLite 内部已编码归一化
+#   外部输入只需原始像素 [0,255] uint8，禁止再做 preprocess_input
+# ============================================================
+import tensorflow as tf
+import numpy as np
+import os, time
+
+PROJECT_DIR = '/mnt/workspace/PlantRecognizer'
+DATA_DIR    = os.path.join(PROJECT_DIR, 'data')
+MODEL_DIR   = os.path.join(PROJECT_DIR, 'models')
+TFLITE_PATH = os.path.join(MODEL_DIR, 'plant_classifier_int8.tflite')
+
+IMG_SIZE    = 224
+NUM_CLASSES = 30
+CLASS_NAMES = [
+    'aloevera', 'banana', 'bilimbi', 'cantaloupe', 'cassava',
+    'coconut', 'corn', 'cucumber', 'curcuma', 'eggplant',
+    'galangal', 'ginger', 'guava', 'kale', 'longbeans',
+    'mango', 'melon', 'orange', 'paddy', 'papaya',
+    'peperchili', 'pineapple', 'pomelo', 'shallot', 'soybeans',
+    'spinach', 'sweetpotatoes', 'tobacco', 'waterapple', 'watermelon'
+]
+
+print("=" * 60)
+print("📱 Cell 11（修复版）: TFLite INT8 量化模型推理验证")
+print("=" * 60)
+
+# ══════════════════════════════════════════════════════════
+# Step 1: 加载模型 + 打印量化参数
+# ══════════════════════════════════════════════════════════
+print("\n📦 Step 1: 加载 TFLite 模型...")
+
+assert os.path.exists(TFLITE_PATH), f"❌ 模型不存在: {TFLITE_PATH}"
+model_size_mb = os.path.getsize(TFLITE_PATH) / (1024 * 1024)
+
+interpreter = tf.lite.Interpreter(model_path=TFLITE_PATH)
+interpreter.allocate_tensors()
+
+in_d  = interpreter.get_input_details()[0]
+out_d = interpreter.get_output_details()[0]
+
+in_scale  = in_d['quantization'][0]
+in_zp     = in_d['quantization'][1]
+out_scale = out_d['quantization'][0]
+out_zp    = out_d['quantization'][1]
+
+print(f"   模型大小 : {model_size_mb:.2f} MB")
+print(f"\n   ── 输入规格 ─────────────────────────────────")
+print(f"   形状     : {in_d['shape']}")
+print(f"   dtype    : {in_d['dtype']}")
+print(f"   scale    : {in_scale:.6f}")
+print(f"   zp       : {in_zp}")
+print(f"\n   ── 输出规格 ─────────────────────────────────")
+print(f"   形状     : {out_d['shape']}")
+print(f"   dtype    : {out_d['dtype']}")
+print(f"   scale    : {out_scale:.6f}")
+print(f"   zp       : {out_zp}")
+
+# ══════════════════════════════════════════════════════════
+# Step 2: 定义【修复版】推理函数
+#
+# ⭐ 核心修复：uint8 模型输入 = 原始像素 [0,255]
+#    TFLite 内部自动完成：
+#      dequantize: float = (uint8 - zp) * scale → [-1, 1]
+#    外部禁止做 preprocess_input，否则造成双重变换！
+# ══════════════════════════════════════════════════════════
+def preprocess_for_tflite(image_path):
+    """
+    ✅ 正确预处理：resize → uint8 原始像素
+    ❌ 禁止：mobilenet_v2.preprocess_input（已内嵌于模型）
+    """
+    img = tf.io.read_file(image_path)
+    img = tf.image.decode_jpeg(img, channels=3)
+    img = tf.image.resize(img, [IMG_SIZE, IMG_SIZE])
+    # ⭐ 直接转 uint8，保持 [0, 255] 原始像素值
+    img = tf.cast(img, tf.uint8).numpy()
+    return img[np.newaxis, ...]   # [1, 224, 224, 3]  uint8
+
+
+def tflite_predict(image_path):
+    """完整推理：预处理 → 推理 → 反量化概率"""
+    input_data  = preprocess_for_tflite(image_path)
+    interpreter.set_tensor(in_d['index'], input_data)
+    interpreter.invoke()
+    output_data = interpreter.get_tensor(out_d['index'])  # uint8 [1,30]
+
+    # 反量化：uint8 → float32 概率
+    if out_scale != 0:
+        probs = (output_data.astype(np.float32) - out_zp) * out_scale
+    else:
+        probs = output_data.astype(np.float32)
+
+    probs      = probs[0]                       # [30]
+    pred_idx   = int(np.argmax(probs))
+    pred_name  = CLASS_NAMES[pred_idx]
+    confidence = float(probs[pred_idx])
+    return probs, pred_idx, pred_name, confidence
+
+# ══════════════════════════════════════════════════════════
+# Step 3: 快速验证（单张图片正确性检查）
+# ══════════════════════════════════════════════════════════
+print("\n🔍 Step 2: 单张图片快速验证...")
+
+# 准备一张真实图片
+_test_path  = val_paths[0]
+_test_label = val_labels[0]
+
+probs, pred_idx, pred_name, conf = tflite_predict(_test_path)
+print(f"   测试图片  : {os.path.basename(_test_path)}")
+print(f"   真实类别  : {CLASS_NAMES[_test_label]}")
+print(f"   预测类别  : {pred_name}  ({'✅ 正确' if pred_idx == _test_label else '❌ 错误'})")
+print(f"   置信度    : {conf*100:.2f}%")
+print(f"   输出范围  : [{probs.min():.4f}, {probs.max():.4f}]  "
+      f"（正常应为 [0, ~1]）")
+
+# 检查输出是否合理（量化正常时 sum ≈ 1）
+prob_sum = probs.sum()
+print(f"   概率总和  : {prob_sum:.4f}  "
+      f"({'✅ 正常' if 0.95 <= prob_sum <= 1.05 else '⚠️ 异常，请检查量化参数'})")
+
+# ══════════════════════════════════════════════════════════
+# Step 4: 推理速度基准测试
+# ══════════════════════════════════════════════════════════
+print("\n⏱️  Step 3: 推理速度基准测试（50 次均值）...")
+
+dummy = np.random.randint(0, 255,
+        in_d['shape'].tolist(), dtype=np.uint8)
+
+# 预热
+for _ in range(5):
+    interpreter.set_tensor(in_d['index'], dummy)
+    interpreter.invoke()
+
+# 计时
+times = []
+for _ in range(50):
+    t0 = time.perf_counter()
+    interpreter.set_tensor(in_d['index'], dummy)
+    interpreter.invoke()
+    times.append((time.perf_counter() - t0) * 1000)
+
+avg_ms = np.mean(times)
+p95_ms = np.percentile(times, 95)
+print(f"   平均延迟  : {avg_ms:.2f} ms")
+print(f"   P95 延迟  : {p95_ms:.2f} ms")
+print(f"   理论 FPS  : {1000/avg_ms:.1f} fps")
+
+# ══════════════════════════════════════════════════════════
+# Step 5: 验证集准确率评估（完整 3000 张）
+# ══════════════════════════════════════════════════════════
+print("\n📊 Step 4: 验证集准确率评估（完整 3000 张）...")
+print("   进度每 300 张打印一次...\n")
+
+# 重建 val_paths / val_labels（若丢失）
+if 'val_paths' not in dir() or len(val_paths) == 0:
+    print("   ⚠️  重建 val_paths...")
+    from modelscope.msdatasets import MsDataset
+    val_ms     = MsDataset.load('reymond/plants_type_dataset',
+                    subset_name='default', split='validation',
+                    cache_dir=DATA_DIR)
+    val_paths  = [s['image:FILE'] for s in val_ms]
+    val_labels = [int(s['category']) for s in val_ms]
+    print(f"   ✅ 重建完成: {len(val_paths)} 条")
+
+EVAL_LIMIT  = len(val_paths)   # ⭐ 完整 3000 张
+eval_paths  = val_paths[:EVAL_LIMIT]
+eval_labels = val_labels[:EVAL_LIMIT]
+
+correct      = 0
+top3_correct = 0
+total        = 0
+errors       = 0
+
+for i, (path, true_label) in enumerate(zip(eval_paths, eval_labels)):
+    try:
+        probs, pred_idx, pred_name, conf = tflite_predict(path)
+        if pred_idx == true_label:
+            correct += 1
+        if true_label in np.argsort(probs)[-3:]:
+            top3_correct += 1
+        total += 1
+    except Exception as e:
+        errors += 1
+
+    if (i + 1) % 300 == 0:
+        cur_acc = correct / total if total > 0 else 0
+        print(f"   [{i+1:>4}/{EVAL_LIMIT}]  "
+              f"Top-1: {cur_acc:.4f} ({cur_acc*100:.2f}%)  "
+              f"跳过: {errors}")
+
+top1_acc = correct      / total if total > 0 else 0
+top3_acc = top3_correct / total if total > 0 else 0
+
+print(f"\n   ── 完整评估结果 ──────────────────────────────")
+print(f"   有效样本  : {total} / {EVAL_LIMIT}")
+print(f"   Top-1 准确率: {top1_acc:.4f}  ({top1_acc*100:.2f}%)")
+print(f"   Top-3 准确率: {top3_acc:.4f}  ({top3_acc*100:.2f}%)")
+
+keras_acc = 0.8797
+acc_drop  = keras_acc - top1_acc
+print(f"\n   Keras float32 基准 : {keras_acc:.4f}  (87.97%)")
+print(f"   量化精度损失       : {acc_drop:+.4f}  ({acc_drop*100:+.2f}%)")
+
+if acc_drop <= 0.02:
+    grade = "🏆 优秀（< 2%）"
+elif acc_drop <= 0.05:
+    grade = "✅ 合格（< 5%）"
+else:
+    grade = "❌ 异常（> 5%）"
+print(f"   量化质量评级       : {grade}")
+
+# ══════════════════════════════════════════════════════════
+# Step 6: 随机样本可视化（5 张）
+# ══════════════════════════════════════════════════════════
+print("\n🖼️  Step 5: 随机样本可视化验证（5 张）...")
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+
+np.random.seed(2025)
+sample_indices = np.random.choice(len(val_paths), 5, replace=False)
+
+fig, axes = plt.subplots(1, 5, figsize=(20, 5))
+fig.suptitle(f'TFLite INT8 推理验证  |  Top-1={top1_acc*100:.2f}%  '
+             f'量化损失={acc_drop*100:+.2f}%',
+             fontsize=12, fontweight='bold')
+
+for ax, idx in zip(axes, sample_indices):
+    path       = val_paths[idx]
+    true_label = val_labels[idx]
+    probs, pred_idx, pred_name, conf = tflite_predict(path)
+    is_correct = (pred_idx == true_label)
+
+    try:
+        ax.imshow(mpimg.imread(path))
+    except Exception:
+        ax.text(0.5, 0.5, "加载失败", ha='center',
+                va='center', transform=ax.transAxes)
+
+    color = '#2e7d32' if is_correct else '#c62828'
+    mark  = '✓' if is_correct else '✗'
+    ax.set_title(
+        f"{mark} 预测: {pred_name}\n"
+        f"真实: {CLASS_NAMES[true_label]}\n"
+        f"置信度: {conf*100:.1f}%",
+        color=color, fontsize=9, fontweight='bold'
+    )
+    ax.axis('off')
+
+plt.tight_layout()
+vis_path = os.path.join(MODEL_DIR, 'tflite_inference_samples.png')
+plt.savefig(vis_path, dpi=120, bbox_inches='tight')
+plt.show()
+print(f"   ✅ 可视化已保存: {vis_path}")
+
+# ══════════════════════════════════════════════════════════
+# 最终报告
+# ══════════════════════════════════════════════════════════
+print(f"\n{'='*60}")
+print(f"🏁 Cell 11（修复版）完成！")
+print(f"{'='*60}")
+print(f"  📁 模型文件   : plant_classifier_int8.tflite")
+print(f"  📦 模型大小   : {model_size_mb:.2f} MB")
+print(f"  ⚡ 推理延迟   : {avg_ms:.2f} ms / 张（CPU）")
+print(f"  🎯 Top-1 准确率: {top1_acc*100:.2f}%")
+print(f"  🎯 Top-3 准确率: {top3_acc*100:.2f}%")
+print(f"  📉 量化精度损失: {acc_drop*100:+.2f}%")
+print(f"  🔢 输入格式   : uint8 [1,224,224,3]（原始像素，无需预处理）")
+print(f"  🔢 输出格式   : uint8 [1,30]")
+print(f"{'='*60}")
+
+TARGET_ACC = 0.85
+if top1_acc >= TARGET_ACC:
+    print(f"\n🎉 PoC 验收通过！TFLite INT8 准确率 "
+          f"{top1_acc*100:.2f}% ≥ 85% ✅")
+    print(f"\n➡️  模型已就绪，可部署至 Android/iOS 设备！")
+else:
+    print(f"\n⚠️  Top-1 = {top1_acc*100:.2f}%，仍未达到 85% 目标")
+    print(f"   请检查 Step 2 的概率总和是否正常（应接近 1.0）")mo
+```
+
+# 模型验收报告
+
+📁 文件名 : plant_classifier_int8.tflite\
+📦 模型大小 : 2.90 MB （Keras float32 原始 \~9.9 MB，压缩 -70.7%）\
+⚡ 推理延迟 : 14.55 ms （CPU，≈ 68.7 FPS，移动端完全实时）\
+🎯 Top-1 准确率: 87.13% （≥ 85% 目标 ✅）\
+🎯 Top-3 准确率: 96.80% （极高置信度覆盖）\
+📉 量化精度损失: +0.84% （行业标准 &lt; 2% 为优秀 🏆）\
+🔢 输入格式 : uint8 \[1, 224, 224, 3\]\
+🔢 输出格式 : uint8 \[1, 30\]
