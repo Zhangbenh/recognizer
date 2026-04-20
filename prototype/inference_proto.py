@@ -24,6 +24,12 @@ TFLite 推理原型 — 阶段二技术验证 #2
     # 若不指定 --image，程序会先尝试从 tests/ 目录自动选第一张图片；
     # 若 tests/ 没有可用图片，才会回退到随机张量。
 
+已确认基线（2026-04-20，当前设备实测通过）：
+    - 运行时：ai-edge-litert（Python 3.13）
+    - 模型路径：../models/plant_classifier_int8.tflite
+    - 自动测试图：tests/bana.jpg（在 prototype/ 下运行时会自动兼容 ../tests）
+    - 推理结果：30 类输出维度正确，时延验收通过（平均约 45 ms）
+
 依赖安装：
     当前树莓派 Python 3.13 环境建议使用 LiteRT 新包：
         pip install ai-edge-litert numpy pillow

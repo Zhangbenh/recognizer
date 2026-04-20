@@ -22,8 +22,18 @@ GPIO 按键输入原型 — 阶段二技术验证 #3
   运行后按按键，终端输出事件。
   按 Ctrl+C 退出并显示统计报告。
 
+已确认基线（2026-04-20，当前设备实测通过）：
+    - BTN1: GPIO17（短按/长按均可稳定识别）
+    - BTN2: GPIO18（短按/长按均可稳定识别）
+    - 长按阈值：1000 ms
+    - 软件去抖：50 ms
+    - 实测结果：双键均有响应，长按验证通过
+
 依赖安装：
   sudo apt install -y python3-rpi.gpio
+
+    若当前项目使用 venv，建议创建时带上 --system-site-packages，
+    或直接使用系统 python3 运行本原型。
 """
 
 import sys
@@ -47,10 +57,10 @@ class ButtonState:
         self._pressed   = False     # 当前是否处于按下状态
         self._press_ts  = 0.0       # 按下时刻（monotonic）
 
-    def update(self, gpio_module) -> str | None:
+    def update(self, gpio_module) -> tuple[str, float] | None:
         """
-        轮询当前电平，返回事件字符串或 None。
-        返回值: "SHORT_PRESS" | "LONG_PRESS" | None
+        轮询当前电平，返回 (事件字符串, 按住时长ms) 或 None。
+        返回值: ("SHORT_PRESS" | "LONG_PRESS", duration_ms) | None
         """
         # GPIO.LOW（0）= 按键按下（接 GND）
         level = gpio_module.input(self.pin)
@@ -69,9 +79,9 @@ class ButtonState:
             self._pressed = False
 
             if duration_ms >= LONG_PRESS_MS:
-                return "LONG_PRESS"
+                return "LONG_PRESS", duration_ms
             else:
-                return "SHORT_PRESS"
+                return "SHORT_PRESS", duration_ms
 
         return None
 
@@ -128,6 +138,8 @@ def run():
     except ImportError:
         print("[ERROR] RPi.GPIO 未找到。")
         print("  请执行: sudo apt install -y python3-rpi.gpio")
+        print("  若使用 venv，请确认该环境通过 --system-site-packages 继承了系统包，")
+        print("  或直接使用系统 python3 运行本脚本。")
         print("  此脚本只能在树莓派上运行。")
         sys.exit(1)
     except RuntimeError as e:
@@ -160,10 +172,14 @@ def run():
     try:
         while True:
             for btn in (btn1, btn2):
-                event = btn.update(GPIO)
-                if event:
+                result = btn.update(GPIO)
+                if result:
+                    event, duration_ms = result
                     duration_display = "长按" if "LONG" in event else "短按"
-                    print(f"  [{btn.name}] {duration_display}  ({event})")
+                    print(
+                        f"  [{btn.name}] {duration_display}  "
+                        f"({event}, {duration_ms:.0f} ms)"
+                    )
                     stats.record(btn.name, event)
 
             time.sleep(POLL_INTERVAL)
