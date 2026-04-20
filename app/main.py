@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import sys
 from pathlib import Path
 
 from application.input_mapper import InputMapper
@@ -106,12 +105,6 @@ class MockInferenceAdapter(BaseInferenceAdapter):
 
 	def close(self) -> None:
 		self._loaded = False
-
-
-def default_runtime_backend() -> str:
-	"""Use real runtime on Linux/Raspberry Pi and mock on desktop by default."""
-
-	return "mock" if os.name == "nt" else "real"
 
 
 def default_input_backend() -> str:
@@ -219,7 +212,7 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--runtime",
 		choices=("real", "mock"),
-		default=os.getenv("RECOGNIZER_RUNTIME", default_runtime_backend()),
+		default=os.getenv("RECOGNIZER_RUNTIME", "real"),
 		help="runtime backend (real uses camera+tflite, mock runs desktop-safe)",
 	)
 	parser.add_argument(
@@ -237,14 +230,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
 	args = parse_args()
 	logger = create_logger(level=args.log_level)
-	logger.info(
-		"startup config: runtime=%s input=%s python=%s executable=%s os_name=%s",
-		args.runtime,
-		args.input,
-		sys.version.split()[0],
-		sys.executable,
-		os.name,
-	)
 	controller = build_controller(runtime_backend=args.runtime, input_backend=args.input, logger=logger)
 	controller.run(max_ticks=args.max_ticks, idle_sleep_s=max(0.0, args.idle_sleep))
 	return 0
