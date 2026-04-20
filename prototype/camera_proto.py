@@ -37,8 +37,8 @@ import time
 import sys
 
 # ── 常量配置 ─────────────────────────────────────────────────────────────────
-SCREEN_WIDTH  = 480
-SCREEN_HEIGHT = 320
+CAMERA_WIDTH  = 480
+CAMERA_HEIGHT = 320
 TARGET_FPS    = 15          # 验收目标
 RUN_SECONDS   = 30          # 原型运行时长，超时后自动退出并报告
 
@@ -49,6 +49,22 @@ CROSSHAIR_THICK  = 2             # 线宽
 
 # FPS 统计刷新间隔（秒）
 FPS_REPORT_INTERVAL = 2.0
+
+
+def fit_surface_to_screen(pygame, surface, screen):
+    screen_width, screen_height = screen.get_size()
+    surface_width, surface_height = surface.get_size()
+
+    scale = min(screen_width / surface_width, screen_height / surface_height)
+    scaled_size = (
+        max(1, int(surface_width * scale)),
+        max(1, int(surface_height * scale)),
+    )
+
+    scaled_surface = pygame.transform.smoothscale(surface, scaled_size)
+    offset_x = (screen_width - scaled_size[0]) // 2
+    offset_y = (screen_height - scaled_size[1]) // 2
+    return scaled_surface, offset_x, offset_y
 
 # ── 主流程 ───────────────────────────────────────────────────────────────────
 def run():
@@ -67,8 +83,12 @@ def run():
 
     pygame.init()
     try:
+        display_info = pygame.display.Info()
+        screen_width = display_info.current_w or CAMERA_WIDTH
+        screen_height = display_info.current_h or CAMERA_HEIGHT
+
         screen = pygame.display.set_mode(
-            (SCREEN_WIDTH, SCREEN_HEIGHT),
+            (screen_width, screen_height),
             pygame.NOFRAME  # 无边框，适合嵌入式全屏显示
         )
     except pygame.error as e:
@@ -94,15 +114,21 @@ def run():
     # 配置预览分辨率与格式
     # 使用 RGB888 格式，Pygame Surface 可直接使用
     preview_config = picam2.create_preview_configuration(
-        main={"size": (SCREEN_WIDTH, SCREEN_HEIGHT), "format": "RGB888"}
+        main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT), "format": "RGB888"}
     )
     picam2.configure(preview_config)
     picam2.start()
 
+    should_rotate_preview = ((screen_width > screen_height) !=
+                             (CAMERA_WIDTH > CAMERA_HEIGHT))
+
     # 等待摄像头暖机
     time.sleep(0.5)
 
-    print(f"[INFO] 摄像头已启动，分辨率 {SCREEN_WIDTH}×{SCREEN_HEIGHT}")
+    print(f"[INFO] 摄像头已启动，采集分辨率 {CAMERA_WIDTH}×{CAMERA_HEIGHT}")
+    print(f"[INFO] 显示分辨率 {screen_width}×{screen_height}")
+    if should_rotate_preview:
+        print("[INFO] 检测到显示方向与相机方向不一致，已自动旋转预览画面。")
     print(f"[INFO] 原型将运行 {RUN_SECONDS} 秒，目标帧率 ≥ {TARGET_FPS} FPS")
     print("[INFO] 按 Ctrl+C 可提前退出\n")
 
@@ -137,12 +163,20 @@ def run():
             # frame shape 是 (H, W, 3)，需要转置为 (W, H, 3) 才能正确 blit
             surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
 
+            if should_rotate_preview:
+                surface = pygame.transform.rotate(surface, -90)
+
+            scaled_surface, offset_x, offset_y = fit_surface_to_screen(
+                pygame, surface, screen
+            )
+
             # 绘制到屏幕
-            screen.blit(surface, (0, 0))
+            screen.fill((0, 0, 0))
+            screen.blit(scaled_surface, (offset_x, offset_y))
 
             # 叠加十字准星（中央位置）
-            cx = SCREEN_WIDTH  // 2
-            cy = SCREEN_HEIGHT // 2
+            cx = screen_width  // 2
+            cy = screen_height // 2
             # 水平线
             pygame.draw.line(screen, CROSSHAIR_COLOR,
                              (cx - CROSSHAIR_SIZE, cy),
