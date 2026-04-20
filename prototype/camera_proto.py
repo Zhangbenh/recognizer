@@ -21,7 +21,16 @@
   - 当前系统使用 rpicam-* 命令集（Picamera2 底层调用 libcamera，兼容）
 
 依赖安装：
-  pip install picamera2 pygame
+    推荐在树莓派系统中使用系统包，而不是直接在 venv 中 pip 安装：
+        sudo apt update
+        sudo apt install -y python3-picamera2 python3-pygame
+
+    若必须在虚拟环境中通过 pip 安装，至少先补齐原生编译依赖：
+        sudo apt install -y libcap-dev
+        pip install pygame picamera2
+
+    注意：若 picamera2 通过 apt 安装，而当前项目使用 venv，创建 venv 时需带上
+    --system-site-packages，或直接使用系统 python3 运行本原型。
 """
 
 import time
@@ -74,7 +83,9 @@ def run():
     try:
         from picamera2 import Picamera2
     except ImportError:
-        print("[ERROR] picamera2 未安装。请执行: pip install picamera2")
+        print("[ERROR] picamera2 未安装。")
+        print("  树莓派建议执行: sudo apt install -y python3-picamera2")
+        print("  若在 venv 中用 pip 安装失败，请先执行: sudo apt install -y libcap-dev")
         pygame.quit()
         sys.exit(1)
 
