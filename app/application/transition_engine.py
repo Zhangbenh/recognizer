@@ -216,7 +216,7 @@ class TransitionEngine:
 		add(
 			State.ERROR,
 			EventType.CONFIRM_PRESS,
-			TransitionRule(next_state=State.ERROR, follow_up_builder=self._follow_up_retry_press),
+			TransitionRule(next_state=State.ERROR, action=self._action_request_retry),
 		)
 		add(
 			State.ERROR,
@@ -250,6 +250,7 @@ class TransitionEngine:
 	@staticmethod
 	def _action_toggle_home_option(ctx: StateContext, _event: Event) -> None:
 		ctx.toggle_home_option()
+		ctx.home_option_dirty = True
 
 	@staticmethod
 	def _action_set_mode_normal(ctx: StateContext, _event: Event) -> None:
@@ -334,6 +335,11 @@ class TransitionEngine:
 	def _action_retry_success(ctx: StateContext, _event: Event) -> None:
 		ctx.clear_error()
 		ctx.retry_success = False
+		ctx.retry_requested = False
+
+	@staticmethod
+	def _action_request_retry(ctx: StateContext, _event: Event) -> None:
+		ctx.retry_requested = True
 
 	@staticmethod
 	def _action_set_system_error(ctx: StateContext, event: Event) -> None:
@@ -371,7 +377,4 @@ class TransitionEngine:
 			)
 		]
 
-	@staticmethod
-	def _follow_up_retry_press(_ctx: StateContext, _event: Event) -> list[Event]:
-		return [Event(EventType.RETRY_PRESS, source="ErrorPageInputMapping")]
 

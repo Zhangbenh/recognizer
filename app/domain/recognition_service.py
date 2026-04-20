@@ -112,9 +112,19 @@ class RecognitionService:
 		recognized = bool(label) and is_recognized(output.confidence, self._threshold)
 
 		if recognized and label is not None:
-			plant_key = str(label.get("plant_key") or label.get("plant_name") or "")
-			plant_name = str(label.get("plant_name") or plant_key)
-			display_name = str(label.get("display_name") or plant_name)
+			plant_key = str(label.get("plant_key") or label.get("plant_name") or "").strip()
+			if not plant_key:
+				self._logger.warning(
+					"recognized label missing plant key, fallback to unrecognized: class_id=%s",
+					output.class_id,
+				)
+				recognized = False
+				plant_key = None
+				plant_name = None
+				display_name = None
+			else:
+				plant_name = str(label.get("plant_name") or plant_key).strip()
+				display_name = str(label.get("display_name") or plant_name).strip()
 		else:
 			plant_key = None
 			plant_name = None
