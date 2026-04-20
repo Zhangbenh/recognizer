@@ -1,0 +1,76 @@
+Phase 5 采样模式验收指南
+============================
+
+目标
+----
+验证 3B 采样模式链路是否完整：
+HOME(采样) -> MAP_SELECT -> REGION_SELECT -> PREVIEW -> CAPTURED -> INFERENCING -> DISPLAY -> RECORDING -> PREVIEW
+以及 REGION_SELECT <-> STATS。
+
+本指南对应脚本
+--------------
+- scripts/phase5_sampling_mode_acceptance.py
+
+推荐执行方式（仓库根目录）
+----------------------
+1) 本地快速验收（mock）
+   c:/Users/31702/Desktop/recognizer/recognizer/.venv/Scripts/python.exe scripts/phase5_sampling_mode_acceptance.py --runtime mock --input keyboard --cycles 10 --print-cycles
+
+2) 树莓派实机验收（real + keyboard）
+   python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20 --map-nav 1 --region-nav 2 --print-cycles
+
+3) 树莓派 GPIO 输入场景
+   说明：脚本需要模拟按键注入，GPIO 后端不支持模拟输入，当前脚本不适用于 --input gpio。
+   建议：使用 keyboard 后端进行自动化验收，GPIO 场景走手工验收。
+
+在 app 子目录执行时
+------------------
+- 本地 mock:
+  c:/Users/31702/Desktop/recognizer/recognizer/.venv/Scripts/python.exe ../scripts/phase5_sampling_mode_acceptance.py --runtime mock --input keyboard --cycles 10
+- 树莓派 real:
+  python ../scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20
+
+输出
+----
+默认会输出 JSON 报告到：
+- reports/phase5_sampling_mode_report.json
+
+可用 --output 自定义，例如：
+- --output reports/phase5_sampling_mode_report_rpi.json
+
+报告关键字段
+------------
+- pass.state_flow_completed：是否完成完整状态路径
+- pass.recognized_exists：是否至少出现一次识别成功
+- pass.recording_path_seen：区域统计计数是否出现正增量（用于判定录制链路生效）
+- pass.stats_has_items：STATS 是否有数据
+- pass.overall：综合判定
+- sampling.capture_to_display_s.p95_s
+- sampling.full_cycle_s.p95_s
+
+通过判定建议
+------------
+- overall = true
+- recognized_count > 0
+- recorded_delta_count > 0
+- stats.items_count > 0
+
+常见问题
+--------
+1) 提示 input adapter does not support simulated events
+   原因：使用了不支持模拟输入的输入后端。
+   解决：改用 --input keyboard。
+
+2) did not reach state=... within ... ticks
+   原因：流程未按预期推进或运行时异常。
+   解决：
+   - 提高 --max-ticks（例如 1000）
+   - 增加 --print-cycles 查看每轮状态
+   - 检查 logs 和 JSON 报告中的 state_trace_tail
+
+3) real 模式下识别失败较多
+   原因：现场光照、取景不稳定或模型置信度不足。
+   解决：
+   - 固定设备和光照
+   - 使用清晰样本重新测试
+   - 先用 mock 验证状态流，再排查模型输入质量

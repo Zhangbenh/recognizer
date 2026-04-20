@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from application.events import Event, EventType
 from application.state_context import StateContext
+from application.state_handlers.booting_handler import BootingHandler
+from application.state_handlers.error_handler import ErrorHandler
+from application.state_handlers.home_handler import HomeHandler
 from application.state_machine import StateMachine
 from application.states import State
 from application.transition_engine import TransitionEngine, ValidationResult
@@ -124,3 +127,88 @@ def test_state_machine_illegal_internal_event_enqueues_system_error() -> None:
 
 	assert sm.process_next_event() is True
 	assert sm.current_state == State.ERROR
+
+
+def test_home_handler_resets_option_on_return() -> None:
+	ctx = StateContext(selected_home_option="sampling", home_option_dirty=False)
+
+	HomeHandler().on_enter(ctx)
+
+	assert ctx.selected_home_option == "normal"
+
+
+def test_home_handler_preserves_toggle_on_self_loop_nav() -> None:
+	ctx = StateContext(selected_home_option="sampling", home_option_dirty=True)
+
+	HomeHandler().on_enter(ctx)
+
+	assert ctx.selected_home_option == "sampling"
+	assert ctx.home_option_dirty is False
+
+
+def test_booting_handler_rejects_map_without_regions() -> None:
+	class _ReleaseGateOk:
+		def ensure_pass(self) -> None:
+			return None
+
+	class _RecognitionOk:
+		def boot(self) -> None:
+			return None
+
+	class _SamplingRepoInvalid:
+		def list_maps(self):
+			return [{"map_id": "map_a", "display_name": "Map A", "regions": []}]
+
+	ctx = StateContext()
+	handler = BootingHandler(
+		release_gate_service=_ReleaseGateOk(),
+		recognition_service=_RecognitionOk(),
+		sampling_config_repository=_SamplingRepoInvalid(),
+	)
+
+	events = handler.on_enter(ctx)
+
+	assert len(events) == 1
+	assert events[0].event_type == EventType.BOOT_FAIL
+	assert ctx.last_error is not None
+	assert ctx.last_error.error_type == "ConfigError"
+
+
+def test_error_handler_executes_retry_when_requested() -> None:
+	called = {"count": 0}
+
+	def _retry_executor() -> None:
+		called["count"] += 1
+
+	ctx = StateContext(
+		last_error=ErrorInfo(error_type="CameraError", message="boot fail", retryable=True),
+		retry_requested=True,
+	)
+	handler = ErrorHandler(retry_executor=_retry_executor)
+
+	events = handler.on_enter(ctx)
+
+	assert called["count"] == 1
+	assert ctx.retry_success is True
+	assert len(events) == 1
+	assert events[0].event_type == EventType.RETRY_PRESS
+
+
+def test_error_handler_non_retryable_does_not_execute_retry() -> None:
+	called = {"count": 0}
+
+	def _retry_executor() -> None:
+		called["count"] += 1
+
+	ctx = StateContext(
+		last_error=ErrorInfo(error_type="ReleaseGateError", message="blocked", retryable=False),
+		retry_requested=True,
+	)
+	handler = ErrorHandler(retry_executor=_retry_executor)
+
+	events = handler.on_enter(ctx)
+
+	assert called["count"] == 0
+	assert ctx.retry_success is False
+	assert len(events) == 1
+	assert events[0].event_type == EventType.RETRY_PRESS

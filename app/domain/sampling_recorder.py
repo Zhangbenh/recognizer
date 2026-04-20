@@ -4,21 +4,34 @@ from __future__ import annotations
 
 from typing import Any
 
+from domain.errors import DataError
 from domain.errors import StorageError
 from domain.models import RecognitionResult, utc_now_iso
 from infrastructure.storage.base_storage_adapter import BaseStorageAdapter
+from infrastructure.storage.region_stats_repository import RegionStatsRepository
 
 
 class SamplingRecorder:
 	"""Persist recognized plants by region for sampling statistics."""
 
-	def __init__(self, *, storage_adapter: BaseStorageAdapter) -> None:
+	def __init__(
+		self,
+		*,
+		storage_adapter: BaseStorageAdapter | None = None,
+		stats_repository: RegionStatsRepository | None = None,
+	) -> None:
+		if stats_repository is None and storage_adapter is None:
+			raise ValueError("Either storage_adapter or stats_repository must be provided")
+
+		self._stats_repository = stats_repository
 		self._storage_adapter = storage_adapter
 
 	def record(self, region_id: str, result: RecognitionResult) -> None:
 		if not region_id:
 			raise StorageError("region_id is required for recording", retryable=False)
-		if not result.is_recognized or not result.plant_key:
+		if result.is_recognized and not result.plant_key:
+			raise DataError("recognized result missing plant_key", retryable=False)
+		if not result.is_recognized:
 			return
 
 		payload = self._safe_read()
@@ -48,20 +61,38 @@ class SamplingRecorder:
 		self._safe_write(payload)
 
 	def region_records(self, region_id: str) -> dict[str, Any]:
-		payload = self._safe_read()
-		regions = payload.get("regions", {})
-		if not isinstance(regions, dict):
-			return {}
-		region = regions.get(region_id, {})
-		if not isinstance(region, dict):
-			return {}
+		region = self._safe_load_region(region_id)
 		records = region.get("records", {})
 		if not isinstance(records, dict):
 			return {}
 		return records
 
+	def _safe_load_region(self, region_id: str) -> dict[str, Any]:
+		if self._stats_repository is not None:
+			try:
+				return self._stats_repository.load_region_stats(region_id)
+			except Exception as exc:
+				raise StorageError(f"load region stats failed: {exc}", retryable=True) from exc
+
+		payload = self._safe_read()
+		regions = payload.get("regions", {})
+		if not isinstance(regions, dict):
+			return {"records": {}}
+		region = regions.get(region_id, {"records": {}})
+		if not isinstance(region, dict):
+			return {"records": {}}
+		return region
+
 	def _safe_read(self) -> dict[str, Any]:
+		if self._stats_repository is not None:
+			try:
+				return self._stats_repository.load_all()
+			except Exception as exc:
+				raise StorageError(f"read sampling data failed: {exc}", retryable=True) from exc
+
 		try:
+			if self._storage_adapter is None:
+				raise RuntimeError("storage adapter is not configured")
 			data = self._storage_adapter.read(default_value={})
 		except Exception as exc:
 			raise StorageError(f"read sampling data failed: {exc}", retryable=True) from exc
@@ -71,7 +102,16 @@ class SamplingRecorder:
 		return data
 
 	def _safe_write(self, payload: dict[str, Any]) -> None:
+		if self._stats_repository is not None:
+			try:
+				self._stats_repository.save_all(payload)
+			except Exception as exc:
+				raise StorageError(f"write sampling data failed: {exc}", retryable=True) from exc
+			return
+
 		try:
+			if self._storage_adapter is None:
+				raise RuntimeError("storage adapter is not configured")
 			self._storage_adapter.write(payload)
 		except Exception as exc:
 			raise StorageError(f"write sampling data failed: {exc}", retryable=True) from exc

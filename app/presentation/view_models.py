@@ -8,6 +8,24 @@ from application.state_context import StateContext
 from application.states import State
 
 
+def _selected_display_name(items: list[dict[str, Any]], selected_id: str | None, id_key: str) -> str | None:
+	for item in items:
+		if str(item.get(id_key) or "") == str(selected_id or ""):
+			name = item.get("display_name")
+			if isinstance(name, str) and name:
+				return name
+	return None
+
+
+def _available_display_names(items: list[dict[str, Any]]) -> list[str]:
+	names: list[str] = []
+	for item in items:
+		name = item.get("display_name")
+		if isinstance(name, str) and name:
+			names.append(name)
+	return names
+
+
 def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 	base: dict[str, Any] = {
 		"state": state.value,
@@ -22,28 +40,40 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 			}
 		)
 	elif state == State.MAP_SELECT:
+		selected_name = _selected_display_name(ctx.available_maps, ctx.selected_map_id, "map_id")
 		base.update(
 			{
 				"selected_map_id": ctx.selected_map_id,
 				"selected_map_index": ctx.selected_map_index,
 				"map_count": len(ctx.available_maps),
+				"selected_map_display_name": selected_name,
+				"available_map_names": _available_display_names(ctx.available_maps),
 			}
 		)
 	elif state == State.REGION_SELECT:
+		selected_map_name = _selected_display_name(ctx.available_maps, ctx.selected_map_id, "map_id")
+		selected_region_name = _selected_display_name(ctx.available_regions, ctx.selected_region_id, "region_id")
 		base.update(
 			{
 				"selected_map_id": ctx.selected_map_id,
+				"selected_map_display_name": selected_map_name,
 				"selected_region_id": ctx.selected_region_id,
 				"selected_region_index": ctx.selected_region_index,
 				"region_count": len(ctx.available_regions),
+				"selected_region_display_name": selected_region_name,
+				"available_region_names": _available_display_names(ctx.available_regions),
 			}
 		)
 	elif state == State.PREVIEW:
 		if ctx.mode == "sampling":
+			selected_map_name = _selected_display_name(ctx.available_maps, ctx.selected_map_id, "map_id")
+			selected_region_name = _selected_display_name(ctx.available_regions, ctx.selected_region_id, "region_id")
 			base.update(
 				{
 					"selected_map_id": ctx.selected_map_id,
+					"selected_map_display_name": selected_map_name,
 					"selected_region_id": ctx.selected_region_id,
+					"selected_region_display_name": selected_region_name,
 					"hint": "CONFIRM: capture | BACK_LONG: return",
 				}
 			)
@@ -81,6 +111,17 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 					"items": page_items,
 				}
 			)
+	elif state == State.RECORDING:
+		result = ctx.last_recognition_result
+		base.update(
+			{
+				"selected_region_id": ctx.selected_region_id,
+				"display_name": result.display_name if result else None,
+				"plant_name": result.plant_name if result else None,
+				"confidence": result.confidence if result else None,
+				"is_recognized": result.is_recognized if result else False,
+			}
+		)
 	elif state == State.ERROR:
 		error = ctx.last_error
 		base.update(

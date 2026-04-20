@@ -8,6 +8,7 @@ from typing import Optional
 
 from application.state_context import StateContext
 from application.states import State
+from presentation.pages import DisplayPage, MapPage, RegionPage, StatsPage
 from presentation.view_models import build_view_model
 
 
@@ -25,13 +26,28 @@ class Renderer:
 			return view_model
 
 		self._last_signature = signature
-		self._emit(view_model)
+		lines = self._format_lines(state, view_model)
+		self._emit(lines)
 		return view_model
 
-	def _emit(self, view_model: dict) -> None:
+	def _format_lines(self, state: State, view_model: dict) -> list[str]:
+		if state == State.MAP_SELECT:
+			return MapPage.render(view_model)
+		if state == State.REGION_SELECT:
+			return RegionPage.render(view_model)
+		if state == State.STATS:
+			return StatsPage.render(view_model)
+		if state == State.DISPLAY:
+			return DisplayPage.render(view_model)
+		if state == State.RECORDING:
+			return DisplayPage.render_recording(view_model)
+
 		lines = ["[Render]"]
 		for key in sorted(view_model.keys()):
 			lines.append(f"  {key}: {view_model[key]}")
+		return lines
+
+	def _emit(self, lines: list[str]) -> None:
 		text = "\n".join(lines)
 		if self._logger:
 			self._logger.info("\n%s", text)

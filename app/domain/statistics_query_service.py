@@ -8,12 +8,23 @@ from domain.constants import DEFAULT_STATS_PAGE_SIZE
 from domain.errors import DataError, StorageError
 from domain.models import StatsItem, StatsSnapshot
 from infrastructure.storage.base_storage_adapter import BaseStorageAdapter
+from infrastructure.storage.region_stats_repository import RegionStatsRepository
 
 
 class StatisticsQueryService:
 	"""Read sampling records and provide page-friendly snapshots."""
 
-	def __init__(self, *, storage_adapter: BaseStorageAdapter, page_size: int = DEFAULT_STATS_PAGE_SIZE) -> None:
+	def __init__(
+		self,
+		*,
+		storage_adapter: BaseStorageAdapter | None = None,
+		stats_repository: RegionStatsRepository | None = None,
+		page_size: int = DEFAULT_STATS_PAGE_SIZE,
+	) -> None:
+		if stats_repository is None and storage_adapter is None:
+			raise ValueError("Either storage_adapter or stats_repository must be provided")
+
+		self._stats_repository = stats_repository
 		self._storage_adapter = storage_adapter
 		self._page_size = max(1, int(page_size))
 
@@ -39,11 +50,23 @@ class StatisticsQueryService:
 				)
 			)
 
-		items.sort(key=lambda item: (-item.count, item.display_name.lower()))
+		items.sort(key=lambda item: item.display_name.lower())
 		return StatsSnapshot(region_id=region_id, items=items, page_size=self._page_size)
 
 	def _safe_read(self) -> dict[str, Any]:
+		if self._stats_repository is not None:
+			try:
+				payload = self._stats_repository.load_all()
+			except Exception as exc:
+				raise StorageError(f"failed to read stats storage: {exc}", retryable=True) from exc
+
+			if not isinstance(payload, dict):
+				raise DataError("stats storage root must be object", retryable=False)
+			return payload
+
 		try:
+			if self._storage_adapter is None:
+				raise RuntimeError("storage adapter is not configured")
 			payload = self._storage_adapter.read(default_value={})
 		except Exception as exc:
 			raise StorageError(f"failed to read stats storage: {exc}", retryable=True) from exc

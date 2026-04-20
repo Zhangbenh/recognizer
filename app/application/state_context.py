@@ -34,6 +34,8 @@ class StateContext:
 	available_maps: list[dict[str, Any]] = field(default_factory=list)
 	available_regions: list[dict[str, Any]] = field(default_factory=list)
 	retry_success: bool = False
+	retry_requested: bool = False
+	home_option_dirty: bool = False
 
 	def toggle_home_option(self) -> None:
 		if self.selected_home_option == HOME_OPTION_NORMAL:
@@ -65,6 +67,7 @@ class StateContext:
 		self.last_error = None
 		self.error_is_retryable = False
 		self.retry_success = False
+		self.retry_requested = False
 
 	@property
 	def has_available_maps(self) -> bool:
