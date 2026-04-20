@@ -1,0 +1,95 @@
+Phase 4 硬件侧附加验收指南（Real Runtime）
+=================================================
+
+1. 目的
+-------
+本指南用于在树莓派上执行 Phase 4 的硬件侧附加验收：
+- 相机采集时延采样（capture）
+- 真实模型推理时延采样（infer）
+- 单次识别全流程时延采样（full_flow）
+- 按 config/system_config.json 的 performance_budget 做门槛判定
+
+
+2. 脚本位置
+-----------
+scripts/phase4_real_runtime_acceptance.py
+
+
+3. 前置条件
+-----------
+1) 已在树莓派上能运行主程序 real 模式：
+   python app/main.py --runtime real --input gpio --log-level INFO
+
+2) 依赖就绪：
+- 摄像头：picamera2
+- 推理运行时：ai-edge-litert / tflite-runtime / tensorflow 任一可用
+
+3) 当前工作目录为仓库根目录 recognizer
+
+
+4. 推荐执行命令
+---------------
+4.1 标准验收（建议）
+python scripts/phase4_real_runtime_acceptance.py \
+  --runtime real \
+  --input keyboard \
+  --samples 30 \
+  --warmup 5 \
+  --sleep-s 0.02 \
+  --log-level INFO \
+  --output reports/phase4_real_runtime_report.json
+
+说明：
+- input 选 keyboard 即可，本脚本不依赖按键输入轮询。
+- 若你希望和主程序保持一致，也可改为 --input gpio。
+
+
+4.2 打印每次样本（排障用）
+python scripts/phase4_real_runtime_acceptance.py \
+  --runtime real \
+  --input keyboard \
+  --samples 20 \
+  --warmup 3 \
+  --print-samples \
+  --output reports/phase4_real_runtime_report_verbose.json
+
+
+5. 判定规则
+-----------
+脚本当前以 p95 门槛判定，通过项如下：
+- capture_p95 <= performance_budget.capture_s
+- infer_p95 <= performance_budget.infer_s
+- full_flow_p95 <= performance_budget.full_flow_s
+
+overall = 上述三项全为 True
+
+
+6. 报告输出
+-----------
+脚本会输出 JSON 报告，包含：
+- 采样参数（samples/warmup/sleep）
+- 设备与 Python 信息
+- capture/infer/full_flow 的统计值（min/max/mean/median/p95/p99/stdev）
+- 识别比例与平均置信度
+- pass 结果（分项 + overall）
+
+
+7. 快速复验建议
+---------------
+建议至少执行两轮：
+1) 空闲状态一轮（系统冷启动后）
+2) 连续运行后一轮（系统热态）
+
+若两轮都 overall=True，可作为硬件侧附加验收通过依据。
+
+
+8. 常见问题
+-----------
+Q1: 报 No TFLite runtime found
+A1: 当前解释器未安装推理运行时。优先安装 ai-edge-litert，并确认脚本使用的 Python 与安装目标一致。
+
+Q2: 摄像头启动失败
+A2: 检查摄像头连接、权限与 picamera2 环境；先用主程序 real 模式验证摄像头链路。
+
+Q3: full_flow 超预算但 infer 正常
+A3: 优先检查相机采集耗时、系统负载、I/O 抖动；可适当加 --sleep-s 观察抖动变化。
