@@ -39,13 +39,16 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 			}
 		)
 	elif state == State.PREVIEW:
-		base.update(
-			{
-				"selected_map_id": ctx.selected_map_id,
-				"selected_region_id": ctx.selected_region_id,
-				"hint": "CONFIRM: capture | BACK_LONG: return",
-			}
-		)
+		if ctx.mode == "sampling":
+			base.update(
+				{
+					"selected_map_id": ctx.selected_map_id,
+					"selected_region_id": ctx.selected_region_id,
+					"hint": "CONFIRM: capture | BACK_LONG: return",
+				}
+			)
+		else:
+			base.update({"hint": "CONFIRM: capture | BACK_LONG: return"})
 	elif state == State.DISPLAY:
 		result = ctx.last_recognition_result
 		base.update(
