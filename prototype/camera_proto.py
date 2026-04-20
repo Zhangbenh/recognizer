@@ -8,11 +8,18 @@
   4. 画面中央可叠加十字准星 UI 元素
 
 运行方式（树莓派终端）：
-  # 无桌面环境强制使用 framebuffer
-  SDL_VIDEODRIVER=fbcon SDL_FBDEV=/dev/fb0 python3 camera_proto.py
+    # 当前硬件验证通过的显示方式（Waveshare HDMI 小屏）
+    SDL_VIDEODRIVER=kmsdrm python3 camera_proto.py
 
-  # 若 fbcon 不可用（SSH 环境调试），改用 offscreen 模式（不显示，但验证采集链路）
+    # SSH 环境调试可使用 offscreen 模式（不显示，但验证采集链路）
   SDL_VIDEODRIVER=offscreen python3 camera_proto.py
+
+已确认参数（2026-04-20，当前设备实测通过）：
+    - 显示输出后端：kmsdrm
+    - 目标显示分辨率：480×320
+    - 预览旋转角度：180°
+    - 红蓝通道校正：开启
+    - 缩放策略：铺满屏幕（允许轻微裁边以消除黑边）
 
 硬件说明（来自参考硬件调试书）：
   - 摄像头：Camera Module 3（IMX708, CSI）
@@ -39,11 +46,11 @@ import sys
 # ── 常量配置 ─────────────────────────────────────────────────────────────────
 CAMERA_WIDTH  = 480
 CAMERA_HEIGHT = 320
-DISPLAY_WIDTH = 480
+DISPLAY_WIDTH = 480        # 当前 Waveshare 3.5inch HDMI LCD 实测面板分辨率
 DISPLAY_HEIGHT = 320
-PREVIEW_ROTATION = 180     # 预览旋转角度：可选 0 / 90 / -90 / 180
-SWAP_RED_BLUE = True       # 若蓝色显示成红色，则保持 True 以校正 BGR/RGB 顺序
-FILL_SCREEN = True         # True: 铺满屏幕并允许轻微裁边；False: 完整显示并可能留黑边
+PREVIEW_ROTATION = 180     # 当前设备安装方向实测值
+SWAP_RED_BLUE = True       # 当前链路下需要校正 BGR/RGB 顺序
+FILL_SCREEN = True         # 当前设备建议铺满显示，消除四周轻微黑边
 TARGET_FPS    = 15          # 验收目标
 RUN_SECONDS   = 30          # 原型运行时长，超时后自动退出并报告
 

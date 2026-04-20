@@ -22,8 +22,13 @@ TFLite 推理原型 — 阶段二技术验证 #2
   python3 inference_proto.py --model /path/to/plant_classifier_int8.tflite --image test.jpg
 
 依赖安装：
-  pip install tflite-runtime numpy pillow
-  # 注意：使用 tflite-runtime，不需要完整 TensorFlow
+    当前树莓派 Python 3.13 环境建议使用 LiteRT 新包：
+        pip install ai-edge-litert numpy pillow
+
+    兼容路径：
+        - ai-edge-litert：支持 cp313 manylinux aarch64，优先使用
+        - tflite-runtime：旧包，在 aarch64 上通常只提供 cp310/cp311 wheel
+        - tensorflow：最后回退方案，体积较大，不建议仅为推理原型安装
 """
 
 import argparse
@@ -101,19 +106,26 @@ def run(model_path: str, image_path: str | None):
     print(f"  模型大小: {os.path.getsize(model_path) / 1024:.1f} KB")
 
     try:
-        import tflite_runtime.interpreter as tflite
-        Interpreter = tflite.Interpreter
-        print("  运行时  : tflite-runtime ✓")
+        from ai_edge_litert.interpreter import Interpreter
+        print("  运行时  : ai-edge-litert ✓")
     except ImportError:
-        # 回退到完整 TensorFlow（兼容性）
         try:
-            import tensorflow as tf
-            Interpreter = tf.lite.Interpreter
-            print("  运行时  : tensorflow.lite（建议改用 tflite-runtime）")
+            import tflite_runtime.interpreter as tflite
+            Interpreter = tflite.Interpreter
+            print("  运行时  : tflite-runtime ✓")
         except ImportError:
-            print("[ERROR] 未找到 tflite-runtime 或 tensorflow。")
-            print("  请执行: pip install tflite-runtime")
-            sys.exit(1)
+            # 回退到完整 TensorFlow（兼容性）
+            try:
+                import tensorflow as tf
+                Interpreter = tf.lite.Interpreter
+                print("  运行时  : tensorflow.lite（回退路径）")
+            except ImportError:
+                print("[ERROR] 未找到 ai-edge-litert、tflite-runtime 或 tensorflow。")
+                print(f"  当前 Python 版本: {sys.version.split()[0]}")
+                print("  当前树莓派 Python 3.13 环境建议执行:")
+                print("    pip install ai-edge-litert numpy pillow")
+                print("  若坚持使用 tflite-runtime，则通常需要改用 Python 3.11。")
+                sys.exit(1)
 
     t0 = time.monotonic()
     interpreter = Interpreter(model_path=model_path)
