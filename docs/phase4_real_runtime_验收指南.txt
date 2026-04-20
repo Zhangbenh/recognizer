@@ -17,18 +17,25 @@ scripts/phase4_real_runtime_acceptance.py
 
 3. 前置条件
 -----------
-1) 已在树莓派上能运行主程序 real 模式：
-   python app/main.py --runtime real --input gpio --log-level INFO
+1) 已在树莓派上能运行主程序 real 模式（命令与当前目录有关）：
+   - 若当前在仓库根目录 recognizer：
+     python app/main.py --runtime real --input gpio --log-level INFO
+   - 若当前在 app 子目录：
+     python main.py --runtime real --input gpio --log-level INFO
 
 2) 依赖就绪：
 - 摄像头：picamera2
 - 推理运行时：ai-edge-litert / tflite-runtime / tensorflow 任一可用
 
-3) 当前工作目录为仓库根目录 recognizer
+3) 推荐当前工作目录为仓库根目录 recognizer
+  - 可先执行 pwd 确认当前目录
+  - 若你当前在 app 子目录，建议先执行 cd .. 回到仓库根目录
 
 
 4. 推荐执行命令
 ---------------
+以下命令默认在仓库根目录 recognizer 执行。
+
 4.1 标准验收（建议）
 python scripts/phase4_real_runtime_acceptance.py \
   --runtime real \
@@ -52,6 +59,9 @@ python scripts/phase4_real_runtime_acceptance.py \
   --warmup 3 \
   --print-samples \
   --output reports/phase4_real_runtime_report_verbose.json
+
+若你当前在 app 子目录，可改用：
+python ../scripts/phase4_real_runtime_acceptance.py ...
 
 
 5. 判定规则
