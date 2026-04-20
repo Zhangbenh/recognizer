@@ -18,8 +18,11 @@ TFLite 推理原型 — 阶段二技术验证 #2
 运行方式（树莓派终端）：
   python3 inference_proto.py --model /path/to/plant_classifier_int8.tflite
 
-  # 指定测试图片（可选，不指定则使用随机张量）
+    # 指定测试图片（可选）
   python3 inference_proto.py --model /path/to/plant_classifier_int8.tflite --image test.jpg
+
+    # 若不指定 --image，程序会先尝试从 tests/ 目录自动选第一张图片；
+    # 若 tests/ 没有可用图片，才会回退到随机张量。
 
 依赖安装：
     当前树莓派 Python 3.13 环境建议使用 LiteRT 新包：
@@ -43,6 +46,7 @@ IMG_SIZE         = 224
 NUM_CLASSES      = 30
 INFER_ROUNDS     = 10       # 推理次数，取平均时延
 MAX_INFER_SEC    = 2.5      # 验收时延上限（秒）
+SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 # 30 个类别名称（顺序与训练集 label 完全对应，来自模型训练记录 Cell 4）
 CLASS_NAMES = [
@@ -66,11 +70,30 @@ def load_test_image(image_path: str) -> np.ndarray:
     INT8 量化模型输入为原始像素值，不做任何归一化。
     """
     from PIL import Image
-    img = Image.open(image_path).convert("RGB")
+    try:
+        img = Image.open(image_path).convert("RGB")
+    except Exception as exc:
+        raise ValueError(f"无法读取图片文件: {image_path}") from exc
+
     img = img.resize((IMG_SIZE, IMG_SIZE), Image.BILINEAR)
     arr = np.array(img, dtype=np.uint8)          # shape: (224, 224, 3)
     arr = np.expand_dims(arr, axis=0)            # shape: (1, 224, 224, 3)
     return arr
+
+
+def find_first_test_image(test_dir: str = "tests") -> str | None:
+    """从 tests 目录自动挑选第一张支持格式的图片。"""
+    if not os.path.isdir(test_dir):
+        return None
+
+    for name in sorted(os.listdir(test_dir)):
+        path = os.path.join(test_dir, name)
+        if not os.path.isfile(path):
+            continue
+        if name.lower().endswith(SUPPORTED_IMAGE_EXTS):
+            return path
+
+    return None
 
 
 def make_random_input() -> np.ndarray:
@@ -165,17 +188,27 @@ def run(model_path: str, image_path: str | None):
         print("  确认模型是否为 INT8 全整数量化版本。")
 
     # 4. 准备测试输入
-    if image_path:
-        if not os.path.isfile(image_path):
-            print(f"[WARNING] 图片文件不存在: {image_path}，改用随机输入。")
+    selected_image = image_path
+    if not selected_image:
+        selected_image = find_first_test_image("tests")
+        if selected_image:
+            print(f"  测试输入: 自动发现图片 {selected_image}")
+
+    if selected_image:
+        if not os.path.isfile(selected_image):
+            print(f"[WARNING] 图片文件不存在: {selected_image}，改用随机输入。")
             test_input = make_random_input()
             print("  测试输入: 随机张量（uint8）")
+        elif not selected_image.lower().endswith(SUPPORTED_IMAGE_EXTS):
+            print(f"[ERROR] 不支持的图片格式: {selected_image}")
+            print(f"  支持格式: {', '.join(SUPPORTED_IMAGE_EXTS)}")
+            sys.exit(1)
         else:
-            test_input = load_test_image(image_path)
-            print(f"  测试输入: {image_path}")
+            test_input = load_test_image(selected_image)
+            print(f"  测试输入: {selected_image}")
     else:
         test_input = make_random_input()
-        print("  测试输入: 随机张量（uint8，未指定图片）")
+        print("  测试输入: 随机张量（uint8，未指定图片且 tests/ 无可用图片）")
 
     print(f"  输入 shape: {test_input.shape}  dtype: {test_input.dtype}")
 
@@ -262,7 +295,10 @@ if __name__ == "__main__":
         "--image",
         type=str,
         default=None,
-        help="测试图片路径（可选，不指定则使用随机张量）",
+        help=(
+            "测试图片路径（可选，支持 .jpg/.jpeg/.png/.bmp/.webp）；"
+            "不指定时会先尝试 tests/ 目录自动选图"
+        ),
     )
     args = parser.parse_args()
 
