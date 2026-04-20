@@ -96,6 +96,19 @@ def find_first_test_image(test_dir: str = "tests") -> str | None:
     return None
 
 
+def resolve_image_path(image_path: str) -> str | None:
+    """解析图片路径，兼容在 prototype/ 目录运行时引用仓库根目录文件。"""
+    candidates = [image_path]
+    if not os.path.isabs(image_path):
+        candidates.append(os.path.join("..", image_path))
+
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+
+    return None
+
+
 def make_random_input() -> np.ndarray:
     """生成随机 uint8 输入张量，用于无测试图片时验证推理链路。"""
     return np.random.randint(0, 256, (1, IMG_SIZE, IMG_SIZE, 3), dtype=np.uint8)
@@ -189,23 +202,31 @@ def run(model_path: str, image_path: str | None):
 
     # 4. 准备测试输入
     selected_image = image_path
+    if selected_image:
+        resolved = resolve_image_path(selected_image)
+        if resolved:
+            selected_image = resolved
+
     if not selected_image:
-        selected_image = find_first_test_image("tests")
-        if selected_image:
-            print(f"  测试输入: 自动发现图片 {selected_image}")
+        for test_dir in ("tests", "../tests"):
+            selected_image = find_first_test_image(test_dir)
+            if selected_image:
+                print(f"  测试输入: 自动发现图片 {selected_image}")
+                break
 
     if selected_image:
-        if not os.path.isfile(selected_image):
+        resolved = resolve_image_path(selected_image)
+        if not resolved:
             print(f"[WARNING] 图片文件不存在: {selected_image}，改用随机输入。")
             test_input = make_random_input()
             print("  测试输入: 随机张量（uint8）")
-        elif not selected_image.lower().endswith(SUPPORTED_IMAGE_EXTS):
-            print(f"[ERROR] 不支持的图片格式: {selected_image}")
+        elif not resolved.lower().endswith(SUPPORTED_IMAGE_EXTS):
+            print(f"[ERROR] 不支持的图片格式: {resolved}")
             print(f"  支持格式: {', '.join(SUPPORTED_IMAGE_EXTS)}")
             sys.exit(1)
         else:
-            test_input = load_test_image(selected_image)
-            print(f"  测试输入: {selected_image}")
+            test_input = load_test_image(resolved)
+            print(f"  测试输入: {resolved}")
     else:
         test_input = make_random_input()
         print("  测试输入: 随机张量（uint8，未指定图片且 tests/ 无可用图片）")
