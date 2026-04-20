@@ -276,6 +276,9 @@ class TransitionEngine:
 		ctx.selected_map_index = next_index
 		map_item = ctx.available_maps[next_index]
 		ctx.selected_map_id = str(map_item.get("map_id") or map_item.get("id") or "") or None
+		# Region selection belongs to a specific map and must be refreshed after map switch.
+		ctx.selected_region_index = None
+		ctx.selected_region_id = None
 
 	@staticmethod
 	def _action_region_next(ctx: StateContext, _event: Event) -> None:
