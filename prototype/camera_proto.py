@@ -39,6 +39,10 @@ import sys
 # ── 常量配置 ─────────────────────────────────────────────────────────────────
 CAMERA_WIDTH  = 480
 CAMERA_HEIGHT = 320
+DISPLAY_WIDTH = 480
+DISPLAY_HEIGHT = 320
+PREVIEW_ROTATION = 90      # 预览旋转角度：可选 0 / 90 / -90 / 180
+SWAP_RED_BLUE = True       # 若蓝色显示成红色，则保持 True 以校正 BGR/RGB 顺序
 TARGET_FPS    = 15          # 验收目标
 RUN_SECONDS   = 30          # 原型运行时长，超时后自动退出并报告
 
@@ -83,9 +87,8 @@ def run():
 
     pygame.init()
     try:
-        display_info = pygame.display.Info()
-        screen_width = display_info.current_w or CAMERA_WIDTH
-        screen_height = display_info.current_h or CAMERA_HEIGHT
+        screen_width = DISPLAY_WIDTH
+        screen_height = DISPLAY_HEIGHT
 
         screen = pygame.display.set_mode(
             (screen_width, screen_height),
@@ -119,16 +122,13 @@ def run():
     picam2.configure(preview_config)
     picam2.start()
 
-    should_rotate_preview = ((screen_width > screen_height) !=
-                             (CAMERA_WIDTH > CAMERA_HEIGHT))
-
     # 等待摄像头暖机
     time.sleep(0.5)
 
     print(f"[INFO] 摄像头已启动，采集分辨率 {CAMERA_WIDTH}×{CAMERA_HEIGHT}")
-    print(f"[INFO] 显示分辨率 {screen_width}×{screen_height}")
-    if should_rotate_preview:
-        print("[INFO] 检测到显示方向与相机方向不一致，已自动旋转预览画面。")
+    print(f"[INFO] 目标显示分辨率 {screen_width}×{screen_height}")
+    print(f"[INFO] 预览旋转角度 {PREVIEW_ROTATION}°")
+    print(f"[INFO] 红蓝通道校正 {'开启' if SWAP_RED_BLUE else '关闭'}")
     print(f"[INFO] 原型将运行 {RUN_SECONDS} 秒，目标帧率 ≥ {TARGET_FPS} FPS")
     print("[INFO] 按 Ctrl+C 可提前退出\n")
 
@@ -159,12 +159,17 @@ def run():
             # 采集一帧（返回 numpy ndarray，shape: H×W×3，RGB）
             frame = picam2.capture_array()
 
+            # 在当前树莓派显示链路下，RGB888 采集结果传给 Pygame 时可能表现为 BGR。
+            # 显式交换 R/B 通道，避免蓝色物体显示成红色。
+            if SWAP_RED_BLUE:
+                frame = frame[:, :, [2, 1, 0]]
+
             # 将 numpy 数组转为 Pygame Surface
             # frame shape 是 (H, W, 3)，需要转置为 (W, H, 3) 才能正确 blit
             surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
 
-            if should_rotate_preview:
-                surface = pygame.transform.rotate(surface, -90)
+            if PREVIEW_ROTATION:
+                surface = pygame.transform.rotate(surface, PREVIEW_ROTATION)
 
             scaled_surface, offset_x, offset_y = fit_surface_to_screen(
                 pygame, surface, screen
