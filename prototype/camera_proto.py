@@ -43,6 +43,7 @@ DISPLAY_WIDTH = 480
 DISPLAY_HEIGHT = 320
 PREVIEW_ROTATION = 180     # 预览旋转角度：可选 0 / 90 / -90 / 180
 SWAP_RED_BLUE = True       # 若蓝色显示成红色，则保持 True 以校正 BGR/RGB 顺序
+FILL_SCREEN = True         # True: 铺满屏幕并允许轻微裁边；False: 完整显示并可能留黑边
 TARGET_FPS    = 15          # 验收目标
 RUN_SECONDS   = 30          # 原型运行时长，超时后自动退出并报告
 
@@ -59,7 +60,11 @@ def fit_surface_to_screen(pygame, surface, screen):
     screen_width, screen_height = screen.get_size()
     surface_width, surface_height = surface.get_size()
 
-    scale = min(screen_width / surface_width, screen_height / surface_height)
+    if FILL_SCREEN:
+        scale = max(screen_width / surface_width, screen_height / surface_height)
+    else:
+        scale = min(screen_width / surface_width, screen_height / surface_height)
+
     scaled_size = (
         max(1, int(surface_width * scale)),
         max(1, int(surface_height * scale)),
@@ -129,6 +134,7 @@ def run():
     print(f"[INFO] 目标显示分辨率 {screen_width}×{screen_height}")
     print(f"[INFO] 预览旋转角度 {PREVIEW_ROTATION}°")
     print(f"[INFO] 红蓝通道校正 {'开启' if SWAP_RED_BLUE else '关闭'}")
+    print(f"[INFO] 缩放模式 {'铺满屏幕' if FILL_SCREEN else '完整显示'}")
     print(f"[INFO] 原型将运行 {RUN_SECONDS} 秒，目标帧率 ≥ {TARGET_FPS} FPS")
     print("[INFO] 按 Ctrl+C 可提前退出\n")
 
