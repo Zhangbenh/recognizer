@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import platform
+import sys
 from typing import Any
 
 from infrastructure.inference.base_inference_adapter import BaseInferenceAdapter, InferenceOutput
@@ -62,28 +64,50 @@ class TFLiteAdapter(BaseInferenceAdapter):
 		self._output_details = None
 
 	def _resolve_interpreter_class(self):
+		import_errors: list[str] = []
+
 		try:
 			from ai_edge_litert.interpreter import Interpreter
 
 			return Interpreter
-		except ImportError:
-			pass
+		except Exception as exc:
+			import_errors.append(f"ai_edge_litert.interpreter: {exc}")
+
+		try:
+			import ai_edge_litert as litert
+
+			interpreter_cls = getattr(litert, "Interpreter", None)
+			if interpreter_cls is not None:
+				return interpreter_cls
+		except Exception as exc:
+			import_errors.append(f"ai_edge_litert: {exc}")
 
 		try:
 			import tflite_runtime.interpreter as tflite
 
 			return tflite.Interpreter
-		except ImportError:
-			pass
+		except Exception as exc:
+			import_errors.append(f"tflite_runtime.interpreter: {exc}")
 
 		try:
 			import tensorflow as tf
 
 			return tf.lite.Interpreter
-		except ImportError as exc:
-			raise RuntimeError(
-				"No TFLite runtime found. Install ai-edge-litert, tflite-runtime, or tensorflow."
-			) from exc
+		except Exception as exc:
+			import_errors.append(f"tensorflow.lite: {exc}")
+
+		python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+		env_info = (
+			f"python={python_version} executable={sys.executable} "
+			f"platform={platform.platform()}"
+		)
+		details = "; ".join(import_errors)
+		raise RuntimeError(
+			"No TFLite runtime found. "
+			"Install ai-edge-litert (preferred on Raspberry Pi), "
+			"or tflite-runtime/tensorflow if compatible with your Python version. "
+			f"Environment: {env_info}. Import diagnostics: {details}"
+		)
 
 	def _prepare_input_tensor(self, image: Any):
 		if self._input_details is None:
