@@ -22,10 +22,13 @@ class _ButtonState:
 		level = gpio_module.input(self.pin)
 
 		if not self.pressed and level == gpio_module.LOW:
+			press_start_ts = time.monotonic()
 			time.sleep(self.debounce_ms / 1000.0)
 			if gpio_module.input(self.pin) == gpio_module.LOW:
 				self.pressed = True
-				self.press_ts = time.monotonic()
+				# Keep initial press timestamp so long-press threshold reflects
+				# real user hold time instead of debounce-adjusted hold time.
+				self.press_ts = press_start_ts
 
 		elif self.pressed and level == gpio_module.HIGH:
 			duration_ms = (time.monotonic() - self.press_ts) * 1000.0

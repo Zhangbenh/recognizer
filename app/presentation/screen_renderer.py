@@ -133,7 +133,7 @@ class PygameScreenRenderer:
 				title="Region Select",
 				items=view_model.get("available_region_names") or [],
 				selected_text=view_model.get("selected_region_display_name"),
-				hint="NAV next | CONFIRM preview | NAV_LONG stats | BACK_LONG map",
+				hint="BTN2_SHORT next | BTN1_SHORT preview | BTN1_LONG stats | BTN2_LONG map",
 			)
 		elif state == State.PREVIEW:
 			self._draw_crosshair()
@@ -267,8 +267,9 @@ class PygameScreenRenderer:
 	def _draw_list(self, *, title: str, items: list[str], selected_text: Optional[str], hint: str) -> None:
 		pygame = self._pygame
 		screen = self._screen
-		font = self._font_small
-		if pygame is None or screen is None or font is None:
+		item_font = self._font_medium
+		hint_font = self._font_small
+		if pygame is None or screen is None or item_font is None or hint_font is None:
 			return
 
 		self._draw_centered_text(title, y=self._scaled_px(14), size="medium")
@@ -278,9 +279,9 @@ class PygameScreenRenderer:
 			self._draw_hint(hint)
 			return
 
-		max_rows = 4
+		max_rows = 3
 		start_y = self._scaled_px(56)
-		line_h = max(self._scaled_px(44), font.get_height() + self._scaled_px(14))
+		line_h = max(self._scaled_px(58), item_font.get_height() + self._scaled_px(18))
 		selected_index = 0
 		for index, text in enumerate(items):
 			if text == selected_text:
@@ -301,23 +302,28 @@ class PygameScreenRenderer:
 			)
 			pygame.draw.rect(screen, (65, 95, 145) if selected else (34, 36, 44), rect, border_radius=6)
 			marker = ">" if selected else " "
-			label = font.render(f"{marker} {text}", True, (245, 245, 245))
+			label = item_font.render(f"{marker} {text}", True, (245, 245, 245))
 			screen.blit(label, (rect.x + self._scaled_px(8), rect.y + (rect.height - label.get_height()) // 2))
 
-		self._draw_hint(hint)
+		hint_label = hint_font.render(str(hint), True, (236, 236, 236))
+		screen.blit(
+			hint_label,
+			(self._scaled_px(8), self._height - hint_label.get_height() - self._scaled_px(6)),
+		)
 
 	def _draw_result_panel(self, *, view_model: dict[str, Any], recording: bool) -> None:
 		pygame = self._pygame
 		screen = self._screen
-		font_small = self._font_small
-		font_medium = self._font_medium
-		if pygame is None or screen is None or font_small is None or font_medium is None:
+		header_font = self._font_medium
+		name_font = self._font_large
+		meta_font = self._font_medium
+		if pygame is None or screen is None or header_font is None or name_font is None or meta_font is None:
 			return
 
 		panel_w = min(self._width - self._scaled_px(24), int(self._width * 0.92))
 		panel_h = max(
-			self._scaled_px(150),
-			font_small.get_height() * 2 + font_medium.get_height() + self._scaled_px(40),
+			self._scaled_px(180),
+			header_font.get_height() + name_font.get_height() + meta_font.get_height() * 2 + self._scaled_px(42),
 		)
 		panel_x = (self._width - panel_w) // 2
 		panel_y = (self._height - panel_h) // 2
@@ -343,20 +349,20 @@ class PygameScreenRenderer:
 			confidence_text = "--"
 
 		header = "Recording" if recording else "Result"
-		line_top = panel_y + self._scaled_px(10)
-		line_gap = self._scaled_px(8)
-		line2 = line_top + font_small.get_height() + line_gap
-		line3 = line2 + font_medium.get_height() + line_gap
-		screen.blit(font_small.render(header, True, (200, 220, 255)), (panel_x + self._scaled_px(12), line_top))
-		screen.blit(font_medium.render(str(name), True, (255, 255, 255)), (panel_x + self._scaled_px(12), line2))
+		line_top = panel_y + self._scaled_px(12)
+		line_gap = self._scaled_px(10)
+		line2 = line_top + header_font.get_height() + line_gap
+		line3 = line2 + name_font.get_height() + line_gap
+		screen.blit(header_font.render(header, True, (200, 220, 255)), (panel_x + self._scaled_px(12), line_top))
+		screen.blit(name_font.render(str(name), True, (255, 255, 255)), (panel_x + self._scaled_px(12), line2))
 		screen.blit(
-			font_small.render(f"confidence: {confidence_text}", True, (220, 220, 220)),
+			meta_font.render(f"confidence: {confidence_text}", True, (220, 220, 220)),
 			(panel_x + self._scaled_px(12), line3),
 		)
 
 		hint = "Recording in progress..." if recording else (view_model.get("hint") or "")
 		if hint:
-			hint_label = font_small.render(str(hint), True, (236, 236, 236))
+			hint_label = meta_font.render(str(hint), True, (236, 236, 236))
 			screen.blit(
 				hint_label,
 				(panel_x + self._scaled_px(12), panel_y + panel_h - hint_label.get_height() - self._scaled_px(8)),
@@ -365,54 +371,58 @@ class PygameScreenRenderer:
 	def _draw_stats_panel(self, *, view_model: dict[str, Any]) -> None:
 		pygame = self._pygame
 		screen = self._screen
-		font_small = self._font_small
-		font_medium = self._font_medium
-		if pygame is None or screen is None or font_small is None or font_medium is None:
+		meta_font = self._font_medium
+		item_font = self._font_medium
+		if pygame is None or screen is None or meta_font is None or item_font is None:
 			return
 
 		screen.fill((20, 24, 28))
 		self._draw_centered_text("Stats", y=self._scaled_px(12), size="medium")
 		region = view_model.get("region_id") or "<none>"
 		region_y = self._scaled_px(44)
-		screen.blit(font_small.render(f"region: {region}", True, (220, 220, 220)), (self._scaled_px(12), region_y))
+		screen.blit(meta_font.render(f"region: {region}", True, (220, 220, 220)), (self._scaled_px(12), region_y))
 
 		page = int(view_model.get("page", 0)) + 1
 		total_pages = max(1, int(view_model.get("total_pages", 1)))
-		page_y = region_y + font_small.get_height() + self._scaled_px(4)
-		screen.blit(font_small.render(f"page: {page}/{total_pages}", True, (220, 220, 220)), (self._scaled_px(12), page_y))
+		page_y = region_y + meta_font.get_height() + self._scaled_px(4)
+		screen.blit(meta_font.render(f"page: {page}/{total_pages}", True, (220, 220, 220)), (self._scaled_px(12), page_y))
 
 		error_message = view_model.get("stats_error_message")
-		warning_y = page_y + font_small.get_height() + self._scaled_px(4)
+		warning_y = page_y + meta_font.get_height() + self._scaled_px(4)
 		if error_message:
 			screen.blit(
-				font_small.render(f"warning: {error_message}", True, (240, 190, 70)),
+				meta_font.render(f"warning: {error_message}", True, (240, 190, 70)),
 				(self._scaled_px(12), warning_y),
 			)
 
 		items = view_model.get("items") or []
-		items_start_y = warning_y + font_small.get_height() + self._scaled_px(6) if error_message else warning_y
-		row_h = font_small.get_height() + self._scaled_px(6)
+		items_start_y = warning_y + meta_font.get_height() + self._scaled_px(6) if error_message else warning_y
+		row_h = item_font.get_height() + self._scaled_px(8)
 		max_items = max(1, (self._height - items_start_y - self._scaled_px(30)) // row_h)
 		if not items:
-			screen.blit(font_medium.render("No data", True, (180, 180, 180)), (self._scaled_px(12), items_start_y))
+			screen.blit(item_font.render("No data", True, (180, 180, 180)), (self._scaled_px(12), items_start_y))
 		else:
 			for index, item in enumerate(items[:max_items], start=1):
 				name = item.get("display_name") or "<unknown>"
 				count = item.get("count")
 				line = f"{index}. {name}  x{count}"
 				screen.blit(
-					font_small.render(line, True, (245, 245, 245)),
+					item_font.render(line, True, (245, 245, 245)),
 					(self._scaled_px(12), items_start_y + (index - 1) * row_h),
 				)
 
-		self._draw_hint("NAV next page | BACK_LONG region")
+		hint_label = meta_font.render("NAV next page | BACK_LONG region", True, (236, 236, 236))
+		screen.blit(
+			hint_label,
+			(self._scaled_px(8), self._height - hint_label.get_height() - self._scaled_px(6)),
+		)
 
 	def _draw_error_panel(self, *, view_model: dict[str, Any]) -> None:
 		pygame = self._pygame
 		screen = self._screen
-		font_small = self._font_small
-		font_medium = self._font_medium
-		if pygame is None or screen is None or font_small is None or font_medium is None:
+		head_font = self._font_large
+		body_font = self._font_medium
+		if pygame is None or screen is None or head_font is None or body_font is None:
 			return
 
 		screen.fill((45, 8, 8))
@@ -422,13 +432,13 @@ class PygameScreenRenderer:
 		retryable = bool(view_model.get("retryable"))
 
 		error_y = int(self._height * 0.34)
-		screen.blit(font_medium.render(str(error_type), True, (255, 230, 230)), (self._scaled_px(16), error_y))
+		screen.blit(head_font.render(str(error_type), True, (255, 230, 230)), (self._scaled_px(16), error_y))
 		screen.blit(
-			font_small.render(str(error_message), True, (255, 210, 210)),
-			(self._scaled_px(16), error_y + font_medium.get_height() + self._scaled_px(10)),
+			body_font.render(str(error_message), True, (255, 210, 210)),
+			(self._scaled_px(16), error_y + head_font.get_height() + self._scaled_px(10)),
 		)
 		action = "CONFIRM: retry" if retryable else "CONFIRM: ignore"
-		action_label = font_small.render(action, True, (255, 255, 255))
+		action_label = body_font.render(action, True, (255, 255, 255))
 		screen.blit(
 			action_label,
 			(self._scaled_px(16), self._height - action_label.get_height() - self._scaled_px(10)),

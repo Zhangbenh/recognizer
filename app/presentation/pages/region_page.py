@@ -31,6 +31,6 @@ class RegionPage:
 		else:
 			lines.append("  options: <no available regions>")
 
-		lines.append("  actions: NAV next | CONFIRM preview | NAV_LONG stats | BACK_LONG map")
+		lines.append("  actions: BTN2_SHORT next | BTN1_SHORT preview | BTN1_LONG stats | BTN2_LONG map")
 		return lines
 
