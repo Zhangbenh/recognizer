@@ -12,6 +12,7 @@ from domain.errors import (
 	InferenceError,
 	LabelError,
 	ModelError,
+	ReleaseGateError,
 	RecognizerError,
 	StateMachineError,
 	StorageError,
@@ -44,6 +45,7 @@ class ErrorPolicy:
 			ConfigError.__name__,
 			LabelError.__name__,
 			ModelError.__name__,
+			ReleaseGateError.__name__,
 			StateMachineError.__name__,
 		}:
 			return State.ERROR

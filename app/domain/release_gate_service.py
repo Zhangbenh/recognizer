@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domain.errors import ModelError
+from domain.errors import ReleaseGateError
 from infrastructure.config.model_manifest_repository import ModelManifestRepository
 from infrastructure.config.system_config_repository import SystemConfigRepository
 
@@ -43,7 +43,7 @@ class ReleaseGateService:
 
 		actual_top1 = float(manifest.get("evaluated_top1_accuracy", 0.0))
 		actual_classes = int(manifest.get("output_classes", -1))
-		raise ModelError(
+		raise ReleaseGateError(
 			(
 				"release gate failed: "
 				f"top1={actual_top1:.4f} required>={min_top1:.4f}, "

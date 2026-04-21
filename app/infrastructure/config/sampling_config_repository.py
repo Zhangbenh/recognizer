@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from domain.errors import ConfigError
+
 
 class SamplingConfigRepository:
 	"""Load and query sampling_config.json."""
@@ -18,18 +20,23 @@ class SamplingConfigRepository:
 
 	def load(self) -> dict:
 		if not self._file_path.exists():
-			raise FileNotFoundError(f"sampling config not found: {self._file_path}")
-		with self._file_path.open("r", encoding="utf-8") as file:
-			payload = json.load(file)
+			raise ConfigError(f"sampling config not found: {self._file_path}", retryable=True)
+
+		try:
+			with self._file_path.open("r", encoding="utf-8") as file:
+				payload = json.load(file)
+		except Exception as exc:
+			raise ConfigError(f"sampling config is invalid: {exc}", retryable=True) from exc
+
 		if not isinstance(payload, dict):
-			raise ValueError("sampling_config.json root must be an object")
+			raise ConfigError("sampling_config.json root must be an object", retryable=True)
 		return payload
 
 	def list_maps(self) -> list[dict]:
 		payload = self.load()
 		maps = payload.get("maps", [])
 		if not isinstance(maps, list):
-			raise ValueError("sampling_config.json field 'maps' must be a list")
+			raise ConfigError("sampling_config.json field 'maps' must be a list", retryable=True)
 		return maps
 
 	def get_map(self, map_id: str) -> dict | None:

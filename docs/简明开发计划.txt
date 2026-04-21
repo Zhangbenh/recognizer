@@ -316,6 +316,55 @@ MAP → REGION → RECORDING → STATS
 
 ---
 
+### 7.4 Phase 6 执行记录（2026-04-21）
+
+已完成交付：
+
+* 启动脚本：`scripts/run_mock.ps1`、`scripts/run_real_pi.sh`
+* 收口检查脚本：`scripts/phase6_release_check.ps1`
+* README：`README.md`
+* 部署指南：`docs/部署指南.txt`
+* 已知问题清单：`docs/已知问题清单.txt`
+
+验证方式：
+
+* 执行 `python -m pytest -q`
+* 执行 `scripts/phase4_real_runtime_acceptance.py`（mock 路径）
+* 执行 `scripts/phase5_sampling_mode_acceptance.py`（mock 路径）
+
+备注：
+
+* 树莓派实机性能与硬件链路验收仍需在 real 模式执行。
+
+---
+
+### 7.5 Phase 7 第三阶段总验收记录（2026-04-21）
+
+验收范围：
+
+* 3A 普通模式最小闭环
+* 3B 采样模式链路与统计
+* 3C 错误处理与安全回退
+
+执行结果：
+
+* `pytest` 阶段三相关套件：27/27 通过
+* `phase5_sampling_mode_acceptance.py`（mock）：overall=true
+* `run_mock.ps1 -MaxTicks 200`：退出码 0
+
+结论：
+
+* 第三阶段总验收通过（mock 路径）
+
+证据：
+
+* `reports/phase7_stage3_pytest.xml`
+* `reports/phase7_stage3_sampling_report.json`
+* `reports/phase7_stage3_final_acceptance_report.json`
+* `docs/phase7_第三阶段总验收报告.txt`
+
+---
+
 ## 8. 完成定义（Done Definition）
 
 你的项目完成，必须满足：

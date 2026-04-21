@@ -32,6 +32,10 @@ class ModelError(RecognizerError):
 	pass
 
 
+class ReleaseGateError(RecognizerError):
+	pass
+
+
 class CameraError(RecognizerError):
 	pass
 

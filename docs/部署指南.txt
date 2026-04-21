@@ -1,0 +1,124 @@
+Plant Recognizer 部署指南
+============================
+
+1. 适用环境
+-----------
+- 开发/联调：Windows + keyboard + mock
+- 实机运行：Raspberry Pi + GPIO + real
+
+
+2. 前置条件
+-----------
+2.1 通用
+- Python 3.11+（当前项目已在 3.14 开发环境验证）
+- 已拉取本仓库
+- 模型文件存在：models/plant_classifier_int8.tflite
+
+2.2 树莓派额外依赖
+- 摄像头库：python3-picamera2
+- GPIO 库：python3-rpi.gpio
+- 推理运行时：ai-edge-litert（优先）
+
+推荐安装命令（Raspberry Pi）：
+
+sudo apt update
+sudo apt install -y python3-picamera2 python3-rpi.gpio
+python3 -m pip install --upgrade pip
+python3 -m pip install ai-edge-litert numpy pillow
+
+注意：
+- 若使用 venv，请确保运行时与安装依赖使用同一解释器。
+- 若报 No TFLite runtime found，优先检查 sys.executable 对应环境是否安装了 ai-edge-litert。
+
+
+3. 配置与模型路径
+------------------
+固定约定：
+- labels: config/labels.json
+- model manifest: config/model_manifest.json
+- sampling config: config/sampling_config.json
+- system config: config/system_config.json
+- model file: models/plant_classifier_int8.tflite
+- data file: data/sampling_records.json
+
+
+4. 启动方式
+-----------
+4.1 Windows（mock）
+
+.venv\Scripts\python.exe app\main.py --runtime mock --input keyboard --log-level INFO
+
+或：
+
+powershell -ExecutionPolicy Bypass -File scripts/run_mock.ps1
+
+4.2 Raspberry Pi（real）
+
+python3 app/main.py --runtime real --input gpio --log-level INFO
+
+或：
+
+bash scripts/run_real_pi.sh
+
+
+5. 验收命令
+-----------
+5.1 全量测试
+
+.venv\Scripts\python.exe -m pytest -q
+
+5.2 Phase 4（性能）
+
+python scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase4_real_runtime_report.json
+
+5.3 Phase 5（采样）
+
+python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase5_sampling_mode_report.json
+
+5.4 Phase 6（收口检查）
+
+powershell -ExecutionPolicy Bypass -File scripts/phase6_release_check.ps1
+
+5.5 Phase 7 实机签收（第三阶段）
+
+方式 A（逐条）：
+
+python3 scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase7_phase4_real_report.json
+python3 scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase7_phase5_real_report.json
+
+方式 B（一键）：
+
+bash scripts/phase7_real_signoff_pi.sh
+
+通过判据：
+- Phase4：reports/phase7_phase4_real_report.json 的 pass.overall=true
+- Phase5：reports/phase7_phase5_real_report.json 的 pass.overall=true
+- 总签收：Phase4 overall=true 且 Phase5 overall=true
+- 详细清单见：docs/phase7_实机签收清单.txt
+
+
+6. 故障排查
+-----------
+6.1 No TFLite runtime found
+- 原因：当前解释器环境没有推理运行时
+- 处理：使用同一解释器安装 ai-edge-litert
+
+6.2 input adapter does not support simulated events
+- 原因：phase5 验收脚本使用了 gpio 输入
+- 处理：改用 --input keyboard
+
+6.3 摄像头启动失败
+- 检查 CSI 排线、权限与 picamera2 安装
+- 先用 real 模式最小命令验证启动
+
+6.4 GPIO 无响应
+- 检查 BCM 编号（BTN1=17, BTN2=18）
+- 检查 pull-up 与按键到 GND 接线
+
+
+7. 交付建议
+-----------
+- 交付时附带 reports/ 下最新 phase4/phase5 报告
+- Phase 7 实机签收时附带 phase7_phase4_real_report.json 与 phase7_phase5_real_report.json
+- 记录目标设备型号、系统版本、Python 版本
+- 保留 docs/已知问题清单.txt 便于后续迭代

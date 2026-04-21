@@ -1,0 +1,81 @@
+Phase 7 实机签收清单（Raspberry Pi）
+=====================================
+
+目标
+----
+完成第三阶段在 real 硬件链路下的最终签收：
+- Phase 4 real（性能门槛）
+- Phase 5 real（采样流程与统计）
+
+
+前置检查
+--------
+1) 设备环境
+- Raspberry Pi
+- 摄像头可用
+- 模型文件存在：models/plant_classifier_int8.tflite
+
+2) 依赖安装（使用运行时同一解释器）
+
+sudo apt update
+sudo apt install -y python3-picamera2 python3-rpi.gpio
+python3 -m pip install --upgrade pip
+python3 -m pip install ai-edge-litert numpy pillow
+
+
+执行顺序（命令序列）
+--------------------
+方式 A：逐条执行
+
+1) Phase 4 real
+python3 scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase7_phase4_real_report.json
+
+2) Phase 5 real
+python3 scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase7_phase5_real_report.json
+
+方式 B：一键执行
+
+bash scripts/phase7_real_signoff_pi.sh
+
+
+通过判据
+--------
+1) Phase 4 通过判据
+- reports/phase7_phase4_real_report.json 中：
+  - pass.capture_p95 = true
+  - pass.infer_p95 = true
+  - pass.full_flow_p95 = true
+  - pass.overall = true
+
+2) Phase 5 通过判据
+- reports/phase7_phase5_real_report.json 中：
+  - pass.state_flow_completed = true
+  - pass.recognized_exists = true
+  - pass.recording_path_seen = true
+  - pass.stats_has_items = true
+  - pass.overall = true
+- 建议同时满足：
+  - sampling.recognized_count > 0
+  - sampling.recorded_delta_count > 0
+  - stats.items_count > 0
+
+3) 总签收判据
+- Phase 4 overall=true 且 Phase 5 overall=true
+
+
+失败处置
+--------
+1) No TFLite runtime found
+- 原因：当前解释器缺推理运行时
+- 处理：用当前解释器安装 ai-edge-litert
+
+2) did not reach state=HOME within ... ticks
+- 原因：启动流程失败，通常由模型/依赖/摄像头引起
+- 处理：先单独执行 app/main.py --runtime real 验证启动
+
+3) 摄像头失败
+- 检查 CSI 排线、权限与 picamera2 安装
+
+4) GPIO 场景说明
+- phase5 自动化脚本建议使用 --input keyboard（脚本依赖模拟输入）
+- GPIO 作为手工验收补充

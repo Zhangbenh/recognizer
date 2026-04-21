@@ -14,6 +14,11 @@ class StatsPage:
 		lines.append(f"  mode: {view_model.get('mode')}")
 		lines.append(f"  region_id: {view_model.get('region_id')}")
 
+		error_message = view_model.get("stats_error_message")
+		error_type = view_model.get("stats_error_type")
+		if error_message:
+			lines.append(f"  warning: {error_type}: {error_message}")
+
 		page = int(view_model.get("page", 0)) + 1
 		total_pages = int(view_model.get("total_pages", 1))
 		lines.append(f"  page: {page}/{max(total_pages, 1)}")

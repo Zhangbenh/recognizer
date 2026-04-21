@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from application.events import Event, EventType
+from application.error_policy import ErrorPolicy
 from application.state_context import StateContext
 from application.state_handlers.booting_handler import BootingHandler
+from application.state_handlers.captured_handler import CapturedHandler
 from application.state_handlers.error_handler import ErrorHandler
 from application.state_handlers.home_handler import HomeHandler
+from application.state_handlers.inferencing_handler import InferencingHandler
+from application.state_handlers.recording_handler import RecordingHandler
 from application.state_machine import StateMachine
 from application.states import State
 from application.transition_engine import TransitionEngine, ValidationResult
+from domain.errors import ReleaseGateError
 from domain.models import ErrorInfo
+from domain.models import RecognitionResult
 
 
 def _apply(engine: TransitionEngine, state: State, event: Event, ctx: StateContext) -> State:
@@ -212,3 +218,62 @@ def test_error_handler_non_retryable_does_not_execute_retry() -> None:
 	assert ctx.retry_success is False
 	assert len(events) == 1
 	assert events[0].event_type == EventType.RETRY_PRESS
+
+
+def test_error_policy_release_gate_error_stays_in_error() -> None:
+	policy = ErrorPolicy()
+	err = ReleaseGateError("blocked by release gate", retryable=False)
+
+	assert policy.is_retryable(err) is False
+	assert policy.recovery_target(State.BOOTING, err) == State.ERROR
+
+
+def test_captured_handler_missing_frame_sets_camera_error() -> None:
+	ctx = StateContext(last_captured_frame=None)
+	events = CapturedHandler().on_enter(ctx)
+
+	assert len(events) == 1
+	assert events[0].event_type == EventType.CAPTURE_FAIL
+	assert ctx.last_error is not None
+	assert ctx.last_error.error_type == "CameraError"
+
+
+def test_inferencing_handler_missing_frame_sets_inference_error() -> None:
+	class _RecognitionNeverUsed:
+		def recognize(self, _frame):
+			raise AssertionError("recognize should not be called without frame")
+
+	ctx = StateContext(last_captured_frame=None)
+	handler = InferencingHandler(recognition_service=_RecognitionNeverUsed())
+	events = handler.on_enter(ctx)
+
+	assert len(events) == 1
+	assert events[0].event_type == EventType.INFER_FAIL
+	assert ctx.last_error is not None
+	assert ctx.last_error.error_type == "InferenceError"
+
+
+def test_recording_handler_missing_region_sets_data_error() -> None:
+	class _RecorderNeverUsed:
+		def record(self, _region_id: str, _result: RecognitionResult) -> None:
+			raise AssertionError("record should not be called without region")
+
+	ctx = StateContext(
+		selected_region_id=None,
+		last_recognition_result=RecognitionResult(
+			class_id=1,
+			plant_key="paddy",
+			plant_name="paddy",
+			display_name="Paddy",
+			confidence=0.9,
+			is_recognized=True,
+			top3=[(1, 0.9)],
+		),
+	)
+	handler = RecordingHandler(sampling_recorder=_RecorderNeverUsed())
+	events = handler.on_enter(ctx)
+
+	assert len(events) == 1
+	assert events[0].event_type == EventType.RECORD_FAIL
+	assert ctx.last_error is not None
+	assert ctx.last_error.error_type == "DataError"

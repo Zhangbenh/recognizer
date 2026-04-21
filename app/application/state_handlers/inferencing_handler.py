@@ -6,6 +6,7 @@ from application.events import Event, EventType
 from application.state_context import StateContext
 from application.state_handlers.base_handler import BaseStateHandler
 from application.states import State
+from domain.errors import InferenceError
 from domain.recognition_service import RecognitionService
 
 
@@ -16,6 +17,7 @@ class InferencingHandler(BaseStateHandler):
 
 	def on_enter(self, ctx: StateContext):
 		if ctx.last_captured_frame is None:
+			ctx.set_error(InferenceError("missing captured frame", retryable=False))
 			return [
 				Event(
 					EventType.INFER_FAIL,
