@@ -28,6 +28,7 @@ class PygameScreenRenderer:
 		self._fullscreen = os.getenv("RECOGNIZER_SCREEN_FULLSCREEN", "1") not in {"0", "false", "False"}
 		self._fill_screen = os.getenv("RECOGNIZER_SCREEN_FILL", "1") not in {"0", "false", "False"}
 		self._preview_rotation = int(os.getenv("RECOGNIZER_PREVIEW_ROTATION", "0"))
+		self._ui_scale = min(2.0, max(1.0, float(os.getenv("RECOGNIZER_UI_SCALE", "1.25"))))
 		self._crosshair_color = (40, 240, 120)
 		self._bg_color = (12, 16, 22)
 		self._panel_bg = (0, 0, 0, 160)
@@ -82,18 +83,19 @@ class PygameScreenRenderer:
 		pygame.display.set_caption("Plant Recognizer")
 		self._pygame = pygame
 		self._screen = screen
-		self._font_small = pygame.font.SysFont(None, 20)
-		self._font_medium = pygame.font.SysFont(None, 24)
-		self._font_large = pygame.font.SysFont(None, 30)
+		self._font_small = pygame.font.Font(None, self._scaled_px(22))
+		self._font_medium = pygame.font.Font(None, self._scaled_px(30))
+		self._font_large = pygame.font.Font(None, self._scaled_px(40))
 		self._ready = True
 
 		self._log_info(
-			"screen renderer ready: backend=%s size=%sx%s fullscreen=%s fill=%s",
+			"screen renderer ready: backend=%s size=%sx%s fullscreen=%s fill=%s ui_scale=%.2f",
 			os.getenv("SDL_VIDEODRIVER", "<default>"),
 			self._width,
 			self._height,
 			self._fullscreen,
 			self._fill_screen,
+			self._ui_scale,
 		)
 
 	def render(self, state: State, view_model: dict[str, Any], ctx: StateContext) -> None:
@@ -232,10 +234,10 @@ class PygameScreenRenderer:
 
 	def _draw_menu(self, *, view_model: dict[str, Any]) -> None:
 		selected = str(view_model.get("selected_home_option") or "normal")
-		self._draw_centered_text("Select Mode", y=56, size="large")
+		self._draw_centered_text("Select Mode", y=self._scaled_px(34), size="large")
 
-		self._draw_menu_item("normal", selected == "normal", y=132)
-		self._draw_menu_item("sampling", selected == "sampling", y=184)
+		self._draw_menu_item("normal", selected == "normal", y=int(self._height * 0.42))
+		self._draw_menu_item("sampling", selected == "sampling", y=int(self._height * 0.62))
 		self._draw_hint(view_model.get("hint"))
 
 	def _draw_menu_item(self, text: str, highlighted: bool, *, y: int) -> None:
@@ -245,7 +247,13 @@ class PygameScreenRenderer:
 		if pygame is None or screen is None or font is None:
 			return
 
-		rect = pygame.Rect(70, y - 20, self._width - 140, 40)
+		item_h = max(self._scaled_px(44), font.get_height() + self._scaled_px(16))
+		rect = pygame.Rect(
+			self._scaled_px(34),
+			y - (item_h // 2),
+			self._width - self._scaled_px(68),
+			item_h,
+		)
 		if highlighted:
 			pygame.draw.rect(screen, (50, 110, 185), rect, border_radius=8)
 			color = (255, 255, 255)
@@ -254,7 +262,7 @@ class PygameScreenRenderer:
 			color = (205, 205, 205)
 
 		label = font.render(text.upper(), True, color)
-		screen.blit(label, (rect.x + 14, rect.y + 9))
+		screen.blit(label, (rect.x + self._scaled_px(14), rect.y + (item_h - label.get_height()) // 2))
 
 	def _draw_list(self, *, title: str, items: list[str], selected_text: Optional[str], hint: str) -> None:
 		pygame = self._pygame
@@ -263,16 +271,16 @@ class PygameScreenRenderer:
 		if pygame is None or screen is None or font is None:
 			return
 
-		self._draw_centered_text(title, y=18, size="medium")
+		self._draw_centered_text(title, y=self._scaled_px(14), size="medium")
 
 		if not items:
 			self._draw_centered_text("No items", y=self._height // 2)
 			self._draw_hint(hint)
 			return
 
-		max_rows = 5
-		start_y = 64
-		line_h = 40
+		max_rows = 4
+		start_y = self._scaled_px(56)
+		line_h = max(self._scaled_px(44), font.get_height() + self._scaled_px(14))
 		selected_index = 0
 		for index, text in enumerate(items):
 			if text == selected_text:
@@ -285,11 +293,16 @@ class PygameScreenRenderer:
 		for row, text in enumerate(window):
 			item_index = window_start + row
 			selected = item_index == selected_index
-			rect = pygame.Rect(28, start_y + row * line_h, self._width - 56, 34)
+			rect = pygame.Rect(
+				self._scaled_px(20),
+				start_y + row * line_h,
+				self._width - self._scaled_px(40),
+				line_h - self._scaled_px(6),
+			)
 			pygame.draw.rect(screen, (65, 95, 145) if selected else (34, 36, 44), rect, border_radius=6)
 			marker = ">" if selected else " "
 			label = font.render(f"{marker} {text}", True, (245, 245, 245))
-			screen.blit(label, (rect.x + 8, rect.y + 8))
+			screen.blit(label, (rect.x + self._scaled_px(8), rect.y + (rect.height - label.get_height()) // 2))
 
 		self._draw_hint(hint)
 
@@ -301,8 +314,11 @@ class PygameScreenRenderer:
 		if pygame is None or screen is None or font_small is None or font_medium is None:
 			return
 
-		panel_w = min(self._width - 32, 420)
-		panel_h = 132
+		panel_w = min(self._width - self._scaled_px(24), int(self._width * 0.92))
+		panel_h = max(
+			self._scaled_px(150),
+			font_small.get_height() * 2 + font_medium.get_height() + self._scaled_px(40),
+		)
 		panel_x = (self._width - panel_w) // 2
 		panel_y = (self._height - panel_h) // 2
 
@@ -311,7 +327,13 @@ class PygameScreenRenderer:
 		screen.blit(panel, (panel_x, panel_y))
 
 		border_color = (255, 190, 80) if recording else (95, 170, 240)
-		pygame.draw.rect(screen, border_color, pygame.Rect(panel_x, panel_y, panel_w, panel_h), 2, border_radius=10)
+		pygame.draw.rect(
+			screen,
+			border_color,
+			pygame.Rect(panel_x, panel_y, panel_w, panel_h),
+			2,
+			border_radius=self._scaled_px(10),
+		)
 
 		name = view_model.get("display_name") or "Unrecognized"
 		confidence = view_model.get("confidence")
@@ -321,14 +343,24 @@ class PygameScreenRenderer:
 			confidence_text = "--"
 
 		header = "Recording" if recording else "Result"
-		screen.blit(font_small.render(header, True, (200, 220, 255)), (panel_x + 12, panel_y + 10))
-		screen.blit(font_medium.render(str(name), True, (255, 255, 255)), (panel_x + 12, panel_y + 44))
-		screen.blit(font_small.render(f"confidence: {confidence_text}", True, (220, 220, 220)), (panel_x + 12, panel_y + 78))
+		line_top = panel_y + self._scaled_px(10)
+		line_gap = self._scaled_px(8)
+		line2 = line_top + font_small.get_height() + line_gap
+		line3 = line2 + font_medium.get_height() + line_gap
+		screen.blit(font_small.render(header, True, (200, 220, 255)), (panel_x + self._scaled_px(12), line_top))
+		screen.blit(font_medium.render(str(name), True, (255, 255, 255)), (panel_x + self._scaled_px(12), line2))
+		screen.blit(
+			font_small.render(f"confidence: {confidence_text}", True, (220, 220, 220)),
+			(panel_x + self._scaled_px(12), line3),
+		)
 
 		hint = "Recording in progress..." if recording else (view_model.get("hint") or "")
 		if hint:
 			hint_label = font_small.render(str(hint), True, (236, 236, 236))
-			screen.blit(hint_label, (panel_x + 12, panel_y + panel_h - 24))
+			screen.blit(
+				hint_label,
+				(panel_x + self._scaled_px(12), panel_y + panel_h - hint_label.get_height() - self._scaled_px(8)),
+			)
 
 	def _draw_stats_panel(self, *, view_model: dict[str, Any]) -> None:
 		pygame = self._pygame
@@ -339,28 +371,39 @@ class PygameScreenRenderer:
 			return
 
 		screen.fill((20, 24, 28))
-		self._draw_centered_text("Stats", y=16, size="medium")
+		self._draw_centered_text("Stats", y=self._scaled_px(12), size="medium")
 		region = view_model.get("region_id") or "<none>"
-		screen.blit(font_small.render(f"region: {region}", True, (220, 220, 220)), (12, 48))
+		region_y = self._scaled_px(44)
+		screen.blit(font_small.render(f"region: {region}", True, (220, 220, 220)), (self._scaled_px(12), region_y))
 
 		page = int(view_model.get("page", 0)) + 1
 		total_pages = max(1, int(view_model.get("total_pages", 1)))
-		screen.blit(font_small.render(f"page: {page}/{total_pages}", True, (220, 220, 220)), (12, 70))
+		page_y = region_y + font_small.get_height() + self._scaled_px(4)
+		screen.blit(font_small.render(f"page: {page}/{total_pages}", True, (220, 220, 220)), (self._scaled_px(12), page_y))
 
 		error_message = view_model.get("stats_error_message")
+		warning_y = page_y + font_small.get_height() + self._scaled_px(4)
 		if error_message:
-			screen.blit(font_small.render(f"warning: {error_message}", True, (240, 190, 70)), (12, 92))
+			screen.blit(
+				font_small.render(f"warning: {error_message}", True, (240, 190, 70)),
+				(self._scaled_px(12), warning_y),
+			)
 
 		items = view_model.get("items") or []
+		items_start_y = warning_y + font_small.get_height() + self._scaled_px(6) if error_message else warning_y
+		row_h = font_small.get_height() + self._scaled_px(6)
+		max_items = max(1, (self._height - items_start_y - self._scaled_px(30)) // row_h)
 		if not items:
-			screen.blit(font_medium.render("No data", True, (180, 180, 180)), (12, 132))
+			screen.blit(font_medium.render("No data", True, (180, 180, 180)), (self._scaled_px(12), items_start_y))
 		else:
-			base_y = 106
-			for index, item in enumerate(items[:4], start=1):
+			for index, item in enumerate(items[:max_items], start=1):
 				name = item.get("display_name") or "<unknown>"
 				count = item.get("count")
 				line = f"{index}. {name}  x{count}"
-				screen.blit(font_small.render(line, True, (245, 245, 245)), (12, base_y + (index - 1) * 34))
+				screen.blit(
+					font_small.render(line, True, (245, 245, 245)),
+					(self._scaled_px(12), items_start_y + (index - 1) * row_h),
+				)
 
 		self._draw_hint("NAV next page | BACK_LONG region")
 
@@ -373,15 +416,23 @@ class PygameScreenRenderer:
 			return
 
 		screen.fill((45, 8, 8))
-		self._draw_centered_text("Error", y=18, size="large")
+		self._draw_centered_text("Error", y=self._scaled_px(14), size="large")
 		error_type = view_model.get("error_type") or "UnknownError"
 		error_message = view_model.get("error_message") or "no details"
 		retryable = bool(view_model.get("retryable"))
 
-		screen.blit(font_medium.render(str(error_type), True, (255, 230, 230)), (16, 96))
-		screen.blit(font_small.render(str(error_message), True, (255, 210, 210)), (16, 132))
+		error_y = int(self._height * 0.34)
+		screen.blit(font_medium.render(str(error_type), True, (255, 230, 230)), (self._scaled_px(16), error_y))
+		screen.blit(
+			font_small.render(str(error_message), True, (255, 210, 210)),
+			(self._scaled_px(16), error_y + font_medium.get_height() + self._scaled_px(10)),
+		)
 		action = "CONFIRM: retry" if retryable else "CONFIRM: ignore"
-		screen.blit(font_small.render(action, True, (255, 255, 255)), (16, self._height - 28))
+		action_label = font_small.render(action, True, (255, 255, 255))
+		screen.blit(
+			action_label,
+			(self._scaled_px(16), self._height - action_label.get_height() - self._scaled_px(10)),
+		)
 
 	def _draw_crosshair(self) -> None:
 		pygame = self._pygame
@@ -391,7 +442,7 @@ class PygameScreenRenderer:
 
 		cx = self._width // 2
 		cy = self._height // 2
-		size = 18
+		size = self._scaled_px(16)
 		pygame.draw.line(screen, self._crosshair_color, (cx - size, cy), (cx + size, cy), 2)
 		pygame.draw.line(screen, self._crosshair_color, (cx, cy - size), (cx, cy + size), 2)
 
@@ -414,11 +465,11 @@ class PygameScreenRenderer:
 			return
 
 		label = font.render(text, True, (255, 255, 255))
-		pad_x = 10
-		pad_y = 5
+		pad_x = self._scaled_px(10)
+		pad_y = self._scaled_px(5)
 		rect = pygame.Rect(
-			12,
-			12,
+			self._scaled_px(12),
+			self._scaled_px(12),
 			label.get_width() + pad_x * 2,
 			label.get_height() + pad_y * 2,
 		)
@@ -436,7 +487,7 @@ class PygameScreenRenderer:
 			return
 
 		label = font.render(str(hint), True, (236, 236, 236))
-		screen.blit(label, (10, self._height - 24))
+		screen.blit(label, (self._scaled_px(8), self._height - label.get_height() - self._scaled_px(6)))
 
 	def _draw_centered_text(self, text: str, *, y: int, size: str = "medium") -> None:
 		pygame = self._pygame
@@ -469,3 +520,6 @@ class PygameScreenRenderer:
 	def _log_info(self, msg: str, *args: Any) -> None:
 		if self._logger:
 			self._logger.info(msg, *args)
+
+	def _scaled_px(self, value: int) -> int:
+		return max(12, int(round(value * self._ui_scale)))
