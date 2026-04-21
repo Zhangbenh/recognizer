@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any, Optional
 
@@ -21,9 +22,12 @@ class PygameScreenRenderer:
 		self._font_large = None
 		self._ready = False
 
-		self._width = int(os.getenv("RECOGNIZER_SCREEN_WIDTH", "480"))
-		self._height = int(os.getenv("RECOGNIZER_SCREEN_HEIGHT", "320"))
+		# Width/height default to auto detect. Set explicit values when needed.
+		self._width = max(0, int(os.getenv("RECOGNIZER_SCREEN_WIDTH", "0")))
+		self._height = max(0, int(os.getenv("RECOGNIZER_SCREEN_HEIGHT", "0")))
+		self._fullscreen = os.getenv("RECOGNIZER_SCREEN_FULLSCREEN", "1") not in {"0", "false", "False"}
 		self._fill_screen = os.getenv("RECOGNIZER_SCREEN_FILL", "1") not in {"0", "false", "False"}
+		self._preview_rotation = int(os.getenv("RECOGNIZER_PREVIEW_ROTATION", "0"))
 		self._crosshair_color = (40, 240, 120)
 		self._bg_color = (12, 16, 22)
 		self._panel_bg = (0, 0, 0, 160)
@@ -47,13 +51,33 @@ class PygameScreenRenderer:
 			os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
 
 		pygame.init()
+		display_info = pygame.display.Info()
+		if self._width <= 0:
+			self._width = int(display_info.current_w or 480)
+		if self._height <= 0:
+			self._height = int(display_info.current_h or 320)
+
+		flags = pygame.NOFRAME
+		if self._fullscreen:
+			flags |= pygame.FULLSCREEN
+
 		try:
-			screen = pygame.display.set_mode((self._width, self._height), pygame.NOFRAME)
+			screen = pygame.display.set_mode((self._width, self._height), flags)
 		except pygame.error as exc:
-			pygame.quit()
-			raise RuntimeError(
-				f"failed to initialize pygame display backend ({os.getenv('SDL_VIDEODRIVER')}): {exc}"
-			) from exc
+			if self._fullscreen:
+				try:
+					screen = pygame.display.set_mode((0, 0), flags)
+					self._width, self._height = screen.get_size()
+				except pygame.error:
+					pygame.quit()
+					raise RuntimeError(
+						f"failed to initialize pygame display backend ({os.getenv('SDL_VIDEODRIVER')}): {exc}"
+					) from exc
+			else:
+				pygame.quit()
+				raise RuntimeError(
+					f"failed to initialize pygame display backend ({os.getenv('SDL_VIDEODRIVER')}): {exc}"
+				) from exc
 
 		pygame.display.set_caption("Plant Recognizer")
 		self._pygame = pygame
@@ -64,10 +88,12 @@ class PygameScreenRenderer:
 		self._ready = True
 
 		self._log_info(
-			"screen renderer ready: backend=%s size=%sx%s",
+			"screen renderer ready: backend=%s size=%sx%s fullscreen=%s fill=%s",
 			os.getenv("SDL_VIDEODRIVER", "<default>"),
 			self._width,
 			self._height,
+			self._fullscreen,
+			self._fill_screen,
 		)
 
 	def render(self, state: State, view_model: dict[str, Any], ctx: StateContext) -> None:
@@ -180,6 +206,8 @@ class PygameScreenRenderer:
 
 		array = array.astype("uint8", copy=False)
 		surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
+		if self._preview_rotation in {90, 180, 270}:
+			surface = pygame.transform.rotate(surface, self._preview_rotation)
 		return self._fit_surface_to_screen(surface)
 
 	def _fit_surface_to_screen(self, surface):
@@ -197,8 +225,8 @@ class PygameScreenRenderer:
 			scale = min(self._width / surface_width, self._height / surface_height)
 
 		target_size = (
-			max(1, int(surface_width * scale)),
-			max(1, int(surface_height * scale)),
+			max(1, int(math.ceil(surface_width * scale))),
+			max(1, int(math.ceil(surface_height * scale))),
 		)
 		return pygame.transform.smoothscale(surface, target_size)
 
@@ -273,10 +301,17 @@ class PygameScreenRenderer:
 		if pygame is None or screen is None or font_small is None or font_medium is None:
 			return
 
-		panel_h = 110
-		panel = pygame.Surface((self._width, panel_h), pygame.SRCALPHA)
-		panel.fill(self._panel_bg)
-		screen.blit(panel, (0, self._height - panel_h))
+		panel_w = min(self._width - 32, 420)
+		panel_h = 132
+		panel_x = (self._width - panel_w) // 2
+		panel_y = (self._height - panel_h) // 2
+
+		panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+		panel.fill((0, 0, 0, 190))
+		screen.blit(panel, (panel_x, panel_y))
+
+		border_color = (255, 190, 80) if recording else (95, 170, 240)
+		pygame.draw.rect(screen, border_color, pygame.Rect(panel_x, panel_y, panel_w, panel_h), 2, border_radius=10)
 
 		name = view_model.get("display_name") or "Unrecognized"
 		confidence = view_model.get("confidence")
@@ -286,16 +321,14 @@ class PygameScreenRenderer:
 			confidence_text = "--"
 
 		header = "Recording" if recording else "Result"
-		screen.blit(font_small.render(header, True, (180, 210, 255)), (12, self._height - panel_h + 8))
-		screen.blit(font_medium.render(str(name), True, (255, 255, 255)), (12, self._height - panel_h + 34))
-		screen.blit(font_small.render(f"confidence: {confidence_text}", True, (220, 220, 220)), (12, self._height - 28))
+		screen.blit(font_small.render(header, True, (200, 220, 255)), (panel_x + 12, panel_y + 10))
+		screen.blit(font_medium.render(str(name), True, (255, 255, 255)), (panel_x + 12, panel_y + 44))
+		screen.blit(font_small.render(f"confidence: {confidence_text}", True, (220, 220, 220)), (panel_x + 12, panel_y + 78))
 
-		if recording:
-			self._draw_badge("Recording...", color=(255, 190, 80))
-		else:
-			hint = view_model.get("hint")
-			if hint:
-				self._draw_hint(hint)
+		hint = "Recording in progress..." if recording else (view_model.get("hint") or "")
+		if hint:
+			hint_label = font_small.render(str(hint), True, (236, 236, 236))
+			screen.blit(hint_label, (panel_x + 12, panel_y + panel_h - 24))
 
 	def _draw_stats_panel(self, *, view_model: dict[str, Any]) -> None:
 		pygame = self._pygame
