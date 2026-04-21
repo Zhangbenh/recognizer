@@ -74,7 +74,7 @@ print(
     "[Phase7-Real] Phase5 counters:",
     "recognized_count=%s" % phase5["sampling"]["recognized_count"],
     "recorded_delta_count=%s" % phase5["sampling"]["recorded_delta_count"],
-    "stats_items_count=%s" % phase5["stats"]["items_count],
+    "stats_items_count=%s" % phase5["stats"]["items_count"],
 )
 
 if not (phase4_pass and phase5_pass):
