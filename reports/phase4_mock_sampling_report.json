@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-21T04:58:22.072737+00:00",
+  "generated_at": "2026-04-21T04:58:52.421203+00:00",
   "runtime": "mock",
   "input_backend": "keyboard",
   "platform": {
@@ -18,31 +18,31 @@
     "selected_region_id": "map_a_r1"
   },
   "sampling": {
-    "boot_elapsed_s": 0.0015087999927345663,
+    "boot_elapsed_s": 0.002555200000642799,
     "recognized_count": 10,
     "recording_seen_count": 0,
     "recorded_delta_count": 10,
-    "baseline_records_total": 51,
-    "final_records_total": 61,
+    "baseline_records_total": 61,
+    "final_records_total": 71,
     "capture_to_display_s": {
       "count": 10,
-      "min_s": 0.00034100000630132854,
-      "max_s": 0.0005381999944802374,
-      "mean_s": 0.00043136000022059307,
-      "median_s": 0.00043575000017881393,
-      "p95_s": 0.0005093999978271313,
-      "p99_s": 0.0005324399951496161,
-      "stdev_s": 5.505860643930518e-05
+      "min_s": 0.0005006999999750406,
+      "max_s": 0.0008360000065295026,
+      "mean_s": 0.000624559998686891,
+      "median_s": 0.0005983000010019168,
+      "p95_s": 0.0008134999989124481,
+      "p99_s": 0.0008315000050060917,
+      "stdev_s": 0.00010125421736692369
     },
     "full_cycle_s": {
       "count": 10,
-      "min_s": 0.004512500003329478,
-      "max_s": 0.009467299998505041,
-      "mean_s": 0.005901820000144653,
-      "median_s": 0.005260950005322229,
-      "p95_s": 0.008532604999345493,
-      "p99_s": 0.009280360998673132,
-      "stdev_s": 0.0015031578263941664
+      "min_s": 0.0051807999989250675,
+      "max_s": 0.007107299999915995,
+      "mean_s": 0.0059488899976713585,
+      "median_s": 0.005909149993385654,
+      "p95_s": 0.0067884300013247405,
+      "p99_s": 0.007043526000197744,
+      "stdev_s": 0.000557885746427285
     }
   },
   "stats": {
@@ -60,8 +60,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.0003825000021606684,
-      "full_cycle_s": 0.009467299998505041,
+      "capture_to_display_s": 0.0006223999953363091,
+      "full_cycle_s": 0.007107299999915995,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false
@@ -69,8 +69,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.00047420000191777945,
-      "full_cycle_s": 0.005009700005757622,
+      "capture_to_display_s": 0.0008360000065295026,
+      "full_cycle_s": 0.006321100008790381,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false
@@ -78,8 +78,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.00036439999530557543,
-      "full_cycle_s": 0.004512500003329478,
+      "capture_to_display_s": 0.0005445999995572492,
+      "full_cycle_s": 0.005189000003156252,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false
@@ -87,8 +87,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.0004706999898189679,
-      "full_cycle_s": 0.006696999989799224,
+      "capture_to_display_s": 0.0005988000048091635,
+      "full_cycle_s": 0.0058354999928269535,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false
@@ -96,8 +96,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.0005381999944802374,
-      "full_cycle_s": 0.004840599998715334,
+      "capture_to_display_s": 0.0005535999953281134,
+      "full_cycle_s": 0.005498999991687015,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false
@@ -105,8 +105,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.0004428999964147806,
-      "full_cycle_s": 0.004666299995733425,
+      "capture_to_display_s": 0.0005977999971946701,
+      "full_cycle_s": 0.006139199991594069,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false
@@ -114,8 +114,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.00034100000630132854,
-      "full_cycle_s": 0.006208100006915629,
+      "capture_to_display_s": 0.0006393000076059252,
+      "full_cycle_s": 0.006398700003046542,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false
@@ -123,8 +123,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.00042860000394284725,
-      "full_cycle_s": 0.005512200004886836,
+      "capture_to_display_s": 0.0007859999896027148,
+      "full_cycle_s": 0.005970599988359027,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false
@@ -132,8 +132,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.000447900005383417,
-      "full_cycle_s": 0.004714299997431226,
+      "capture_to_display_s": 0.0005006999999750406,
+      "full_cycle_s": 0.005847699998412281,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false
@@ -141,8 +141,8 @@
     {
       "recognized": true,
       "display_name": "Aloe Vera",
-      "capture_to_display_s": 0.00042320000648032874,
-      "full_cycle_s": 0.007390200000372715,
+      "capture_to_display_s": 0.000566399990930222,
+      "full_cycle_s": 0.0051807999989250675,
       "ticks_to_display": 1,
       "ticks_to_preview": 1,
       "recording_seen": false

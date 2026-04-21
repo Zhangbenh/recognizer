@@ -371,6 +371,128 @@ MAP → REGION → RECORDING → STATS
 
 ---
 
+### 7.6 阶段四系统联调执行记录（2026-04-21）
+
+**联调范围：** 状态机闭环、UI 状态一致、输入触发、记录规则、Inferencing/Recording 不可中断、Display 自动返回
+
+---
+
+#### Step 1 — 联调前基线冻结
+
+* 阶段三基线复核：`phase3a / phase3b / phase3c / overall = true`（见 `reports/phase7_stage3_final_acceptance_report.json`）
+* 通过判据与检查表已固化，覆盖 7 项联调检查点。
+
+状态：✅ 完成
+
+---
+
+#### Step 2 — Mock 全链路联调首轮
+
+执行结果：
+
+* `pytest` 基础回归（4 文件）：29 / 29 通过（阶段三基线无退化）
+* `phase5_sampling_mode_acceptance.py`（mock）：overall=true，recognized_count=10，recorded_delta_count=10，stats_has_items=true
+* `phase4_real_runtime_acceptance.py`（mock）：pass.overall=true，capture/infer/full_flow p95 均满足预算
+
+状态：✅ 完成
+
+证据：
+
+* `reports/phase4_mock_sampling_report.json`
+* `reports/phase4_mock_runtime_report.json`
+
+---
+
+#### Step 3 — 阶段四缺口补齐
+
+新增测试用例（4 件）：
+
+| 编号 | 用例名 | 文件 | 语义 |
+|------|--------|------|------|
+| T3-1 | `test_inferencing_ignores_external_input_and_stays_inferencing` (×4 参数) | `test_state_transitions.py` | INFERENCING 不可中断 |
+| T3-2 | `test_recording_ignores_external_input_and_stays_recording` (×4 参数) | `test_state_transitions.py` | RECORDING 不可中断 |
+| T3-3 | `test_external_events_classified_as_illegal_external_in_locked_states` (3×5 矩阵) | `test_state_transitions.py` | 关键状态外部事件分类矩阵 |
+| T3-4 | `test_display_sampling_mode_back_long_does_not_skip_recording` | `test_sampling_mode_e2e.py` | DISPLAY 采样模式 BTN2_LONG 不跳过记录链路 |
+
+执行结果：
+
+* 补齐后 `pytest`（test_state_transitions + test_sampling_mode_e2e）：40 / 40 通过
+* 阶段四基础全回归（4 文件）：53 / 53 通过，无基线退化
+* `phase5_sampling_mode_acceptance.py`（mock）：overall=true，recognized_count=10，recorded_delta_count=10，recording_path_seen=true
+* `phase4_real_runtime_acceptance.py`（mock）：pass.overall=true，全预算项通过
+
+状态：✅ 完成
+
+证据：
+
+* `reports/phase4_step3_sampling_report.json`
+* `reports/phase4_step3_runtime_report.json`
+
+---
+
+#### Step 4 — Real 硬件链路联调（部分完成）
+
+**phase4_real_runtime_acceptance.py（real）执行结果（2026-04-21）：**
+
+| 指标 | p95 | 预算 | 结论 |
+|------|-----|------|------|
+| capture | 2.68 ms | 200 ms | ✅ pass |
+| infer | 59.70 ms | 2500 ms | ✅ pass |
+| full_flow | 62.25 ms | 3000 ms | ✅ pass |
+
+* boot 耗时：991.12 ms
+* 识别率：30 / 30（100 %）
+* overall pass：true
+* 证据：`/home/zhangbenchley/recognizer/reports/phase4_real_performance_report.json`
+
+**phase5_sampling_mode_acceptance.py（real）：** ⏳ 待执行
+
+```bash
+python scripts/phase5_sampling_mode_acceptance.py \
+  --runtime real --input keyboard --cycles 20 \
+  --output reports/phase4_real_sampling_report.json
+```
+
+状态：🔄 性能验收通过，采样链路验收待执行
+
+---
+
+#### Step 5 — 重点场景手工核验（待执行）
+
+核验项：
+
+1. 状态机完整闭环：HOME→PREVIEW→CAPTURED→INFERENCING→DISPLAY→PREVIEW
+2. UI 与状态一致：屏幕提示与当前状态吻合
+3. 输入触发行为：BTN1_SHORT/BTN2_SHORT/BTN1_LONG/BTN2_LONG 映射正确
+4. 采样记录规则：已识别→写入，未识别→跳过，计数正确
+5. Inferencing 不可中断：推理期间连续按键不改变状态
+6. Recording 不可中断：录制期间连续按键不改变状态
+7. Display 自动返回：5s 超时后按规则自动分流
+
+状态：⏳ 待执行（需 Raspberry Pi 硬件）
+
+---
+
+#### Step 6 — 证据归档（部分完成）
+
+Mock 侧证据：
+
+* `reports/phase4_step3_sampling_report.json` — 采样链路通过
+* `reports/phase4_step3_runtime_report.json` — 性能预算通过
+* `reports/phase4_mock_sampling_report.json` — Step2 采样
+* `reports/phase4_mock_runtime_report.json` — Step2 性能
+
+Real 侧证据：⏳ 待 Raspberry Pi 执行后补充
+
+阶段四 Mock 侧联调结论：
+
+* 状态机业务逻辑闭环已在 mock 路径完整验证通过。
+* 不可中断约束已有显式自动化断言覆盖（T3-1/T3-2/T3-3）。
+* DISPLAY 采样模式 BTN2_LONG 语义已有端到端断言覆盖（T3-4）。
+* 真机硬件链路验收（Step 4/5）需在 Raspberry Pi 上执行后方可签收阶段四。
+
+---
+
 ## 8. 完成定义（Done Definition）
 
 你的项目完成，必须满足：

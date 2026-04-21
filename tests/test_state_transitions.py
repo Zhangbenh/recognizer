@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from application.events import Event, EventType
+import pytest
+
+from application.events import EXTERNAL_EVENTS, Event, EventType
 from application.error_policy import ErrorPolicy
 from application.state_context import StateContext
 from application.state_handlers.booting_handler import BootingHandler
@@ -277,3 +279,90 @@ def test_recording_handler_missing_region_sets_data_error() -> None:
 	assert events[0].event_type == EventType.RECORD_FAIL
 	assert ctx.last_error is not None
 	assert ctx.last_error.error_type == "DataError"
+
+
+# ── T3-1: INFERENCING 不可中断 ────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+	"intruding_event_type",
+	[
+		EventType.BACK_LONG_PRESS,
+		EventType.NAV_PRESS,
+		EventType.CONFIRM_PRESS,
+		EventType.NAV_LONG_PRESS,
+	],
+	ids=["back_long", "nav", "confirm", "nav_long"],
+)
+def test_inferencing_ignores_external_input_and_stays_inferencing(
+	intruding_event_type: EventType,
+) -> None:
+	"""INFERENCING 阶段外部按键不得中断推理，状态保持不变且不升级为 SYSTEM_ERROR。"""
+	sm = StateMachine(initial_state=State.INFERENCING, context=StateContext())
+	sm.start()
+
+	for _ in range(5):
+		sm.enqueue(Event(intruding_event_type, source="test"))
+
+	for _ in range(5):
+		assert sm.process_next_event() is True
+		assert sm.current_state == State.INFERENCING, (
+			f"INFERENCING 不得被 {intruding_event_type.value} 中断"
+		)
+
+	# 不可中断：外部事件被静默忽略，不应在队列中残留 SYSTEM_ERROR
+	assert sm._event_queue.is_empty()
+
+
+# ── T3-2: RECORDING 不可中断 ──────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+	"intruding_event_type",
+	[
+		EventType.BACK_LONG_PRESS,
+		EventType.NAV_PRESS,
+		EventType.CONFIRM_PRESS,
+		EventType.NAV_LONG_PRESS,
+	],
+	ids=["back_long", "nav", "confirm", "nav_long"],
+)
+def test_recording_ignores_external_input_and_stays_recording(
+	intruding_event_type: EventType,
+) -> None:
+	"""RECORDING 阶段外部按键不得中断录制，状态保持不变且不升级为 SYSTEM_ERROR。"""
+	sm = StateMachine(initial_state=State.RECORDING, context=StateContext())
+	sm.start()
+
+	for _ in range(5):
+		sm.enqueue(Event(intruding_event_type, source="test"))
+
+	for _ in range(5):
+		assert sm.process_next_event() is True
+		assert sm.current_state == State.RECORDING, (
+			f"RECORDING 不得被 {intruding_event_type.value} 中断"
+		)
+
+	assert sm._event_queue.is_empty()
+
+
+# ── T3-3: 关键状态非法外部输入分类矩阵 ────────────────────────────────────────
+
+@pytest.mark.parametrize(
+	"locked_state",
+	[State.INFERENCING, State.RECORDING, State.CAPTURED],
+	ids=["inferencing", "recording", "captured"],
+)
+@pytest.mark.parametrize(
+	"external_event_type",
+	list(EXTERNAL_EVENTS),
+	ids=[e.value for e in EXTERNAL_EVENTS],
+)
+def test_external_events_classified_as_illegal_external_in_locked_states(
+	locked_state: State,
+	external_event_type: EventType,
+) -> None:
+	"""INFERENCING / RECORDING / CAPTURED 不接受任何外部按键事件，校验结果应为 ILLEGAL_EXTERNAL。"""
+	engine = TransitionEngine()
+	result = engine.validate_event(locked_state, external_event_type)
+	assert result == ValidationResult.ILLEGAL_EXTERNAL, (
+		f"{locked_state.value} + {external_event_type.value} 应为 ILLEGAL_EXTERNAL，实际为 {result}"
+	)

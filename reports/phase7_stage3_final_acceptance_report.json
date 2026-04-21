@@ -1,5 +1,5 @@
 ﻿{
-    "generated_at":  "2026-04-21T09:24:11+08:00",
+    "generated_at":  "2026-04-21T12:58:29.6193788+08:00",
     "stage":  "Phase7-Stage3",
     "scope":  {
                   "phase3a":  "normal_mode_minimal_flow",
@@ -8,8 +8,8 @@
               },
     "checks":  {
                    "pytest":  {
-                                  "tests":  27,
-                                  "passed":  27,
+                                  "tests":  29,
+                                  "passed":  29,
                                   "failed":  0,
                                   "errors":  0,
                                   "skipped":  0,
@@ -25,26 +25,7 @@
                    "no_deadlock_smoke":  {
                                              "max_ticks":  200,
                                              "result":  "pass"
-                                         },
-                   "real_signoff":  {
-                                        "script":  "scripts/phase7_real_signoff_pi.sh",
-                                        "phase4":  {
-                                                       "overall":  true,
-                                                       "capture_p95_s":  0.0023,
-                                                       "capture_budget_s":  0.2,
-                                                       "infer_p95_s":  0.0581,
-                                                       "infer_budget_s":  2.5,
-                                                       "full_p95_s":  0.0604,
-                                                       "full_budget_s":  3.0
-                                                   },
-                                        "phase5":  {
-                                                       "overall":  true,
-                                                       "recognized_count":  18,
-                                                       "recorded_delta_count":  18,
-                                                       "stats_items_count":  3
-                                                   },
-                                        "overall":  true
-                                    }
+                                         }
                },
     "pass":  {
                  "phase3a":  true,
@@ -52,5 +33,5 @@
                  "phase3c":  true,
                  "overall":  true
              },
-    "note":  "mock path verified in Windows; real hardware signoff completed and passed on Raspberry Pi"
+    "note":  "mock path verified in Windows; real hardware acceptance should be executed on Raspberry Pi"
 }
