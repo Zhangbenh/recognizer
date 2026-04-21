@@ -8,7 +8,7 @@ from typing import Optional
 
 from application.state_context import StateContext
 from application.states import State
-from presentation.pages import DisplayPage, MapPage, RegionPage, StatsPage
+from presentation.pages import DisplayPage, ErrorPage, MapPage, RegionPage, StatsPage
 from presentation.view_models import build_view_model
 
 
@@ -28,6 +28,8 @@ class Renderer:
 		self._last_signature = signature
 		lines = self._format_lines(state, view_model)
 		self._emit(lines)
+		if state == State.PREVIEW and view_model.get("non_fatal_error_message"):
+			ctx.preview_error_flash_pending = False
 		return view_model
 
 	def _format_lines(self, state: State, view_model: dict) -> list[str]:
@@ -41,6 +43,8 @@ class Renderer:
 			return DisplayPage.render(view_model)
 		if state == State.RECORDING:
 			return DisplayPage.render_recording(view_model)
+		if state == State.ERROR:
+			return ErrorPage.render(view_model)
 
 		lines = ["[Render]"]
 		for key in sorted(view_model.keys()):

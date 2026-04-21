@@ -6,6 +6,7 @@ from typing import Any
 
 from application.state_context import StateContext
 from application.states import State
+from domain.errors import CameraError, DataError, InferenceError, StorageError
 
 
 def _selected_display_name(items: list[dict[str, Any]], selected_id: str | None, id_key: str) -> str | None:
@@ -24,6 +25,17 @@ def _available_display_names(items: list[dict[str, Any]]) -> list[str]:
 		if isinstance(name, str) and name:
 			names.append(name)
 	return names
+
+
+def _is_non_fatal_error(error_type: str | None) -> bool:
+	if not error_type:
+		return False
+	return error_type in {
+		CameraError.__name__,
+		DataError.__name__,
+		StorageError.__name__,
+		InferenceError.__name__,
+	}
 
 
 def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
@@ -79,6 +91,15 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 			)
 		else:
 			base.update({"hint": "CONFIRM: capture | BACK_LONG: return"})
+
+		error = ctx.last_error
+		if error and _is_non_fatal_error(error.error_type) and ctx.preview_error_flash_pending:
+			base.update(
+				{
+					"non_fatal_error_type": error.error_type,
+					"non_fatal_error_message": error.message,
+				}
+			)
 	elif state == State.DISPLAY:
 		result = ctx.last_recognition_result
 		base.update(
@@ -93,6 +114,14 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 		snapshot = ctx.current_stats_snapshot
 		if snapshot is None:
 			base.update({"region_id": ctx.selected_region_id, "items": [], "page": 0, "total_pages": 1})
+			error = ctx.last_error
+			if error and _is_non_fatal_error(error.error_type):
+				base.update(
+					{
+						"stats_error_type": error.error_type,
+						"stats_error_message": error.message,
+					}
+				)
 		else:
 			page_index = max(0, ctx.selected_stats_page_index)
 			page_items = [

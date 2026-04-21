@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from application.events import EventType
 from application.input_mapper import InputMapper
 from application.states import State
+from domain.errors import ConfigError, LabelError, ModelError
 from domain.release_gate_service import ReleaseGateService
 from infrastructure.config.label_repository import LabelRepository
 from infrastructure.config.model_manifest_repository import ModelManifestRepository
@@ -84,3 +87,28 @@ def test_config_repositories_contracts_and_release_gate() -> None:
 		system_config_repository=system_repo,
 	)
 	assert release_gate.check() is True
+
+
+def test_label_repository_invalid_payload_raises_label_error(tmp_path) -> None:
+	path = tmp_path / "labels.json"
+	path.write_text('{"labels": {"bad": true}}', encoding="utf-8")
+	repo = LabelRepository(file_path=str(path))
+
+	with pytest.raises(LabelError):
+		repo.load()
+
+
+def test_model_manifest_missing_file_raises_model_error(tmp_path) -> None:
+	repo = ModelManifestRepository(file_path=str(tmp_path / "missing_manifest.json"))
+
+	with pytest.raises(ModelError):
+		repo.load()
+
+
+def test_sampling_config_invalid_maps_raises_config_error(tmp_path) -> None:
+	path = tmp_path / "sampling_config.json"
+	path.write_text('{"maps": {"bad": true}}', encoding="utf-8")
+	repo = SamplingConfigRepository(file_path=str(path))
+
+	with pytest.raises(ConfigError):
+		repo.list_maps()

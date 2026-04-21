@@ -19,5 +19,7 @@ class HomeHandler(BaseStateHandler):
 		else:
 			ctx.selected_home_option = HOME_OPTION_NORMAL
 		ctx.clear_flow_transients()
+		# HOME is the neutral safe page; clear non-fatal residual errors.
+		ctx.clear_error()
 		return []
 

@@ -11,6 +11,7 @@ from application.guard_evaluator import GuardEvaluator
 from application.state_context import StateContext
 from application.states import State
 from domain.constants import MODE_NORMAL, MODE_SAMPLING
+from domain.errors import InferenceError, StorageError
 from domain.models import ErrorInfo, RecognitionResult
 
 
@@ -170,11 +171,15 @@ class TransitionEngine:
 
 		# CAPTURED
 		add(State.CAPTURED, EventType.CAPTURE_OK, TransitionRule(next_state=State.INFERENCING))
-		add(State.CAPTURED, EventType.CAPTURE_FAIL, TransitionRule(next_state=State.PREVIEW, action=self._action_capture_fail))
+		add(
+			State.CAPTURED,
+			EventType.CAPTURE_FAIL,
+			TransitionRule(next_state=State.PREVIEW, action=self._action_capture_fail),
+		)
 
 		# INFERENCING
 		add(State.INFERENCING, EventType.INFER_OK, TransitionRule(next_state=State.DISPLAY, action=self._action_store_recognition))
-		add(State.INFERENCING, EventType.INFER_FAIL, TransitionRule(next_state=State.PREVIEW))
+		add(State.INFERENCING, EventType.INFER_FAIL, TransitionRule(next_state=State.PREVIEW, action=self._action_infer_fail))
 		add(
 			State.INFERENCING,
 			EventType.TIMEOUT,
@@ -205,7 +210,7 @@ class TransitionEngine:
 
 		# RECORDING
 		add(State.RECORDING, EventType.RECORD_OK, TransitionRule(next_state=State.PREVIEW))
-		add(State.RECORDING, EventType.RECORD_FAIL, TransitionRule(next_state=State.PREVIEW))
+		add(State.RECORDING, EventType.RECORD_FAIL, TransitionRule(next_state=State.PREVIEW, action=self._action_record_fail))
 		add(
 			State.RECORDING,
 			EventType.TIMEOUT,
@@ -313,6 +318,21 @@ class TransitionEngine:
 	def _action_capture_fail(ctx: StateContext, event: Event) -> None:
 		reason = str(event.payload.get("reason", "capture_failed"))
 		ctx.set_error(ErrorInfo(error_type="CameraError", message=reason, retryable=True))
+		ctx.preview_error_flash_pending = True
+
+	@staticmethod
+	def _action_infer_fail(ctx: StateContext, event: Event) -> None:
+		if ctx.last_error is None:
+			reason = str(event.payload.get("reason", "infer_failed"))
+			ctx.set_error(InferenceError(reason, retryable=False))
+		ctx.preview_error_flash_pending = True
+
+	@staticmethod
+	def _action_record_fail(ctx: StateContext, event: Event) -> None:
+		if ctx.last_error is None:
+			reason = str(event.payload.get("reason", "record_failed"))
+			ctx.set_error(StorageError(reason, retryable=False))
+		ctx.preview_error_flash_pending = True
 
 	@staticmethod
 	def _action_store_recognition(ctx: StateContext, event: Event) -> None:

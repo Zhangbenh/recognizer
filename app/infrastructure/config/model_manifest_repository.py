@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from domain.errors import ModelError
+
 
 class ModelManifestRepository:
 	"""Load and validate model_manifest.json."""
@@ -18,18 +20,23 @@ class ModelManifestRepository:
 
 	def load(self) -> dict:
 		if not self._file_path.exists():
-			raise FileNotFoundError(f"model manifest not found: {self._file_path}")
-		with self._file_path.open("r", encoding="utf-8") as file:
-			payload = json.load(file)
+			raise ModelError(f"model manifest not found: {self._file_path}", retryable=True)
+
+		try:
+			with self._file_path.open("r", encoding="utf-8") as file:
+				payload = json.load(file)
+		except Exception as exc:
+			raise ModelError(f"model manifest is invalid: {exc}", retryable=True) from exc
+
 		if not isinstance(payload, dict):
-			raise ValueError("model_manifest.json root must be an object")
+			raise ModelError("model_manifest.json root must be an object", retryable=True)
 		return payload
 
 	def get_model_file(self) -> str:
 		payload = self.load()
 		model_file = payload.get("model_file")
 		if not isinstance(model_file, str) or not model_file:
-			raise ValueError("model_manifest.json missing non-empty 'model_file'")
+			raise ModelError("model_manifest.json missing non-empty 'model_file'", retryable=True)
 		return model_file
 
 	def resolve_model_path(self, models_dir: str | None = None) -> Path:
@@ -44,7 +51,7 @@ class ModelManifestRepository:
 		payload = self.load()
 		value = payload.get("output_classes")
 		if not isinstance(value, int):
-			raise ValueError("model_manifest.json missing integer 'output_classes'")
+			raise ModelError("model_manifest.json missing integer 'output_classes'", retryable=True)
 		return value
 
 	def evaluated_top1_accuracy(self) -> float:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from domain.errors import LabelError
+
 
 class LabelRepository:
 	"""Load and query labels.json."""
@@ -20,7 +22,7 @@ class LabelRepository:
 		payload = self._read_json()
 		labels = payload.get("labels", [])
 		if not isinstance(labels, list):
-			raise ValueError("labels.json field 'labels' must be a list")
+			raise LabelError("labels.json field 'labels' must be a list", retryable=True)
 		return labels
 
 	def index_map(self) -> dict[int, dict]:
@@ -40,11 +42,16 @@ class LabelRepository:
 
 	def _read_json(self) -> dict:
 		if not self._file_path.exists():
-			raise FileNotFoundError(f"labels file not found: {self._file_path}")
-		with self._file_path.open("r", encoding="utf-8") as file:
-			payload = json.load(file)
+			raise LabelError(f"labels file not found: {self._file_path}", retryable=True)
+
+		try:
+			with self._file_path.open("r", encoding="utf-8") as file:
+				payload = json.load(file)
+		except Exception as exc:
+			raise LabelError(f"labels file is invalid: {exc}", retryable=True) from exc
+
 		if not isinstance(payload, dict):
-			raise ValueError("labels.json root must be an object")
+			raise LabelError("labels.json root must be an object", retryable=True)
 		return payload
 
 	@staticmethod

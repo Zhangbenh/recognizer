@@ -111,3 +111,45 @@ def test_sampling_mode_end_to_end_flow_and_stats(isolated_sampling_controller) -
 
 	keyboard.push_simulated_event("BTN2_LONG")
 	_tick_until_state(controller, State.REGION_SELECT)
+
+
+def test_record_fail_preview_warning_flashes_once_then_clears(isolated_sampling_controller) -> None:
+	controller = isolated_sampling_controller
+	ctx = controller._state_machine.context
+	keyboard = controller._input_adapter
+
+	emitted: list[str] = []
+	controller._renderer._emit = lambda lines: emitted.append("\n".join(lines))
+
+	_tick_until_state(controller, State.HOME)
+
+	keyboard.push_simulated_event("BTN2_SHORT")
+	keyboard.push_simulated_event("BTN1_SHORT")
+	_tick_until_state(controller, State.MAP_SELECT)
+
+	keyboard.push_simulated_event("BTN1_SHORT")
+	_tick_until_state(controller, State.REGION_SELECT)
+
+	keyboard.push_simulated_event("BTN1_SHORT")
+	_tick_until_state(controller, State.PREVIEW)
+
+	fallback_region_id = str(ctx.available_regions[0].get("region_id") or "")
+	ctx.selected_region_id = None
+
+	keyboard.push_simulated_event("BTN1_SHORT")
+	_tick_until_state(controller, State.DISPLAY)
+	controller._state_machine.enqueue(Event(EventType.TIMEOUT, source="test"))
+	_tick_until_state(controller, State.PREVIEW)
+
+	first_count = sum("non_fatal_error_message: missing_region_id" in chunk for chunk in emitted)
+	assert first_count == 1
+
+	ctx.selected_region_id = fallback_region_id
+	keyboard.push_simulated_event("BTN1_SHORT")
+	_tick_until_state(controller, State.DISPLAY)
+	controller._state_machine.enqueue(Event(EventType.TIMEOUT, source="test"))
+	_tick_until_state(controller, State.PREVIEW)
+
+	second_count = sum("non_fatal_error_message: missing_region_id" in chunk for chunk in emitted)
+	assert second_count == 1
+	assert ctx.last_error is None

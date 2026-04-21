@@ -1,0 +1,37 @@
+﻿{
+    "generated_at":  "2026-04-21T09:06:14.4664552+08:00",
+    "stage":  "Phase7-Stage3",
+    "scope":  {
+                  "phase3a":  "normal_mode_minimal_flow",
+                  "phase3b":  "sampling_mode_flow_and_stats",
+                  "phase3c":  "error_handling_and_safe_fallback"
+              },
+    "checks":  {
+                   "pytest":  {
+                                  "tests":  27,
+                                  "passed":  27,
+                                  "failed":  0,
+                                  "errors":  0,
+                                  "skipped":  0,
+                                  "xml_report":  "reports/phase7_stage3_pytest.xml"
+                              },
+                   "sampling_acceptance":  {
+                                               "overall":  true,
+                                               "recognized_count":  10,
+                                               "recorded_delta_count":  10,
+                                               "stats_items_count":  1,
+                                               "json_report":  "reports/phase7_stage3_sampling_report.json"
+                                           },
+                   "no_deadlock_smoke":  {
+                                             "max_ticks":  200,
+                                             "result":  "pass"
+                                         }
+               },
+    "pass":  {
+                 "phase3a":  true,
+                 "phase3b":  true,
+                 "phase3c":  true,
+                 "overall":  true
+             },
+    "note":  "mock path verified in Windows; real hardware acceptance should be executed on Raspberry Pi"
+}

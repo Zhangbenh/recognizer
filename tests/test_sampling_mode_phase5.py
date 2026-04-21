@@ -3,14 +3,17 @@ from __future__ import annotations
 from application.state_context import StateContext
 from application.states import State
 from domain.errors import DataError
+from domain.models import ErrorInfo
 from domain.models import RecognitionResult
 from domain.sampling_recorder import SamplingRecorder
 from domain.statistics_query_service import StatisticsQueryService
 from infrastructure.storage.json_storage_adapter import JsonStorageAdapter
 from infrastructure.storage.region_stats_repository import RegionStatsRepository
+from presentation.pages.error_page import ErrorPage
 from presentation.pages.map_page import MapPage
 from presentation.pages.region_page import RegionPage
 from presentation.pages.stats_page import StatsPage
+from presentation.renderer import Renderer
 from presentation.view_models import build_view_model
 
 
@@ -162,3 +165,61 @@ def test_sampling_pages_render_with_view_models() -> None:
 	stats_lines = StatsPage.render(stats_vm)
 	assert stats_lines[0] == "[Stats]"
 	assert any("Paddy" in line for line in stats_lines)
+
+
+def test_preview_view_model_contains_non_fatal_error_hint() -> None:
+	ctx = StateContext(
+		mode="normal",
+		preview_error_flash_pending=True,
+		last_error=ErrorInfo(error_type="InferenceError", message="infer timeout", retryable=False),
+	)
+
+	view_model = build_view_model(State.PREVIEW, ctx)
+
+	assert view_model["non_fatal_error_type"] == "InferenceError"
+	assert view_model["non_fatal_error_message"] == "infer timeout"
+
+
+def test_stats_page_renders_warning_for_data_error() -> None:
+	view_model = {
+		"mode": "sampling",
+		"region_id": "map_a_r1",
+		"page": 0,
+		"total_pages": 1,
+		"items": [],
+		"stats_error_type": "DataError",
+		"stats_error_message": "corrupted stats json",
+	}
+
+	lines = StatsPage.render(view_model)
+
+	assert any("warning: DataError: corrupted stats json" in line for line in lines)
+
+
+def test_error_page_render_and_renderer_route() -> None:
+	ctx = StateContext(
+		last_error=ErrorInfo(error_type="CameraError", message="camera unavailable", retryable=True)
+	)
+	renderer = Renderer()
+	emitted: list[list[str]] = []
+	renderer._emit = lambda lines: emitted.append(lines)
+
+	view_model = renderer.render(State.ERROR, ctx)
+
+	assert view_model["error_type"] == "CameraError"
+	assert emitted
+	assert emitted[0][0] == "[Error]"
+	assert any("actions: CONFIRM retry" in line for line in emitted[0])
+
+
+def test_error_page_render_non_retryable_message() -> None:
+	lines = ErrorPage.render(
+		{
+			"error_type": "ReleaseGateError",
+			"error_message": "blocked by policy",
+			"retryable": False,
+		}
+	)
+
+	assert lines[0] == "[Error]"
+	assert any("actions: CONFIRM ignored (non-retryable)" in line for line in lines)

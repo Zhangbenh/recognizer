@@ -1,0 +1,159 @@
+{
+  "generated_at": "2026-04-21T01:06:07.472838+00:00",
+  "runtime": "mock",
+  "input_backend": "keyboard",
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64",
+    "python": "3.14.0"
+  },
+  "config": {
+    "cycles": 10,
+    "map_nav": 0,
+    "region_nav": 0,
+    "max_ticks": 500
+  },
+  "selection": {
+    "selected_region_id": "map_a_r1"
+  },
+  "sampling": {
+    "boot_elapsed_s": 0.002350700000533834,
+    "recognized_count": 10,
+    "recording_seen_count": 0,
+    "recorded_delta_count": 10,
+    "baseline_records_total": 31,
+    "final_records_total": 41,
+    "capture_to_display_s": {
+      "count": 10,
+      "min_s": 0.0001900999923236668,
+      "max_s": 0.0005500999977812171,
+      "mean_s": 0.00033100999717134983,
+      "median_s": 0.00034154999593738467,
+      "p95_s": 0.0004994749986508394,
+      "p99_s": 0.0005399749979551416,
+      "stdev_s": 0.00010703197298845151
+    },
+    "full_cycle_s": {
+      "count": 10,
+      "min_s": 0.004191500003798865,
+      "max_s": 0.008086500005447306,
+      "mean_s": 0.0054038300018874,
+      "median_s": 0.005367300000216346,
+      "p95_s": 0.0072510300022258865,
+      "p99_s": 0.007919406004803023,
+      "stdev_s": 0.0011087349730648341
+    }
+  },
+  "stats": {
+    "items_count": 1,
+    "total_pages": 1
+  },
+  "pass": {
+    "state_flow_completed": true,
+    "recognized_exists": true,
+    "recording_path_seen": true,
+    "stats_has_items": true,
+    "overall": true
+  },
+  "cycle_details": [
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.0003858999989461154,
+      "full_cycle_s": 0.008086500005447306,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.00043759999971371144,
+      "full_cycle_s": 0.0054136999970069155,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.00036330000148154795,
+      "full_cycle_s": 0.00581380000221543,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.00032649999775458127,
+      "full_cycle_s": 0.005320900003425777,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.0001900999923236668,
+      "full_cycle_s": 0.004191500003798865,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.0002697000018088147,
+      "full_cycle_s": 0.004364600012195297,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.0005500999977812171,
+      "full_cycle_s": 0.006229899998288602,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.00035659999412018806,
+      "full_cycle_s": 0.004483600001549348,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.0002136999974027276,
+      "full_cycle_s": 0.0045123000018065795,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "recognized": true,
+      "display_name": "Aloe Vera",
+      "capture_to_display_s": 0.00021659999038092792,
+      "full_cycle_s": 0.005621499993139878,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    }
+  ],
+  "state_trace_tail": [
+    "HOME",
+    "MAP_SELECT",
+    "REGION_SELECT",
+    "PREVIEW",
+    "REGION_SELECT",
+    "STATS"
+  ]
+}

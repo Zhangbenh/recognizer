@@ -1,0 +1,54 @@
+Phase 7 第三阶段总验收报告
+============================
+
+执行日期
+--------
+2026-04-21
+
+验收范围
+--------
+- 3A 普通模式最小闭环
+- 3B 采样模式链路与统计
+- 3C 错误处理与安全回退
+
+执行命令
+--------
+1) pytest（阶段三相关套件）
+   c:/Users/31702/Desktop/recognizer/recognizer/.venv/Scripts/python.exe -m pytest -q tests/test_normal_mode_e2e.py tests/test_sampling_mode_e2e.py tests/test_sampling_mode_phase5.py tests/test_state_transitions.py --junitxml reports/phase7_stage3_pytest.xml
+
+2) 3B 采样验收脚本（mock）
+   c:/Users/31702/Desktop/recognizer/recognizer/.venv/Scripts/python.exe scripts/phase5_sampling_mode_acceptance.py --runtime mock --input keyboard --cycles 10 --output reports/phase7_stage3_sampling_report.json
+
+3) 无卡死冒烟
+   powershell -ExecutionPolicy Bypass -File scripts/run_mock.ps1 -MaxTicks 200 -LogLevel ERROR
+
+验收结果
+--------
+- pytest: tests=27, passed=27, failed=0, errors=0, skipped=0
+- phase5_sampling_mode_acceptance: overall=true
+  - recognized_count=10
+  - recorded_delta_count=10
+  - stats.items_count=1
+- run_mock 冒烟: 退出码 0
+
+阶段判定
+--------
+- Phase 3A: 通过
+- Phase 3B: 通过
+- Phase 3C: 通过
+- 第三阶段总验收: 通过
+
+证据文件
+--------
+- reports/phase7_stage3_pytest.xml
+- reports/phase7_stage3_sampling_report.json
+- reports/phase7_stage3_final_acceptance_report.json
+
+可重复执行脚本
+------------
+- scripts/phase7_stage3_final_acceptance.ps1
+
+说明
+----
+- 本次为 Windows + mock 路径验收。
+- 树莓派 real 硬件链路（相机/GPIO/实机推理）请在目标设备上执行最终签收。
