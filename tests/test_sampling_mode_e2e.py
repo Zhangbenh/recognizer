@@ -158,3 +158,53 @@ def test_record_fail_preview_warning_flashes_once_then_clears(isolated_sampling_
 	second_count = sum("non_fatal_error_message: missing_region_id" in chunk for chunk in emitted)
 	assert second_count == 1
 	assert ctx.last_error is None
+
+
+# ── T3-4: DISPLAY 采样模式下 BTN2_LONG 不得跳过记录链路 ──────────────────────────
+
+def test_display_sampling_mode_back_long_does_not_skip_recording(isolated_sampling_controller) -> None:
+	"""DISPLAY 处于采样模式时，BTN2_LONG (BACK_LONG_PRESS) 不得改变状态；
+	随后 TIMEOUT 应按采样规则（识别成功→RECORDING→PREVIEW，未识别→PREVIEW）流转，
+	不可绕过记录链路。"""
+	controller = isolated_sampling_controller
+	ctx = controller._state_machine.context
+	keyboard = controller._input_adapter
+
+	# Navigate to DISPLAY in sampling mode
+	_tick_until_state(controller, State.HOME)
+	keyboard.push_simulated_event("BTN2_SHORT")
+	keyboard.push_simulated_event("BTN1_SHORT")
+	_tick_until_state(controller, State.MAP_SELECT)
+	keyboard.push_simulated_event("BTN1_SHORT")
+	_tick_until_state(controller, State.REGION_SELECT)
+	keyboard.push_simulated_event("BTN1_SHORT")
+	_tick_until_state(controller, State.PREVIEW)
+	keyboard.push_simulated_event("BTN1_SHORT")
+	_tick_until_state(controller, State.DISPLAY)
+
+	assert ctx.mode == "sampling"
+	assert ctx.last_recognition_result is not None
+	is_recognized = ctx.last_recognition_result.is_recognized
+
+	# BTN2_LONG → BACK_LONG_PRESS: guard is_normal_mode 在采样模式失败 → 状态必须保持 DISPLAY
+	keyboard.push_simulated_event("BTN2_LONG")
+	for _ in range(50):
+		controller.tick()
+	assert controller._state_machine.current_state == State.DISPLAY, (
+		"BTN2_LONG in sampling DISPLAY must not change state (recording chain must not be skipped)"
+	)
+
+	# 验证 TIMEOUT 触发采样规则流转：RECORDING（识别成功）或 PREVIEW（未识别）→ 最终进入 PREVIEW
+	# RECORDING→PREVIEW 在同一 tick 内完成，故用 _tick_until 等待状态离开 DISPLAY
+	controller._state_machine.enqueue(Event(EventType.TIMEOUT, source="test"))
+	_tick_until(controller, lambda s: s != State.DISPLAY, max_ticks=200)
+
+	final_state = controller._state_machine.current_state
+	assert final_state == State.PREVIEW, (
+		f"after TIMEOUT in sampling DISPLAY, expected PREVIEW (via RECORDING if recognized), got {final_state.value}"
+	)
+	if is_recognized:
+		# 识别成功路径必须经过 RECORDING，记录链路不可被跳过 → 无 DataError / StorageError
+		assert ctx.last_error is None, (
+			f"recording chain must complete without error when is_recognized=True, got {ctx.last_error}"
+		)
