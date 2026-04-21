@@ -34,6 +34,36 @@ def test_json_storage_adapter_atomic_write_and_corruption_fallback(tmp_path) -> 
 	assert adapter.read() == {"regions": {}}
 
 
+# ── A2: JSON 存储重复写入稳定性（100次写入，无损坏，文件 < 1MB）───────────────
+
+def test_json_storage_100_repeated_writes_no_corruption(tmp_path) -> None:
+	"""100 次重复写入，每次读回断言内容一致，最终文件大小 < 1MB（系统说明约束）。"""
+	file_path = tmp_path / "stability_records.json"
+	default = {"regions": {}}
+	adapter = JsonStorageAdapter(str(file_path), default_value=default, pretty=False)
+
+	for i in range(100):
+		payload = {
+			"regions": {
+				f"region_{i % 4}": {
+					"records": {
+						"paddy": {"count": i + 1, "confidence": 0.9},
+						"aloevera": {"count": i, "confidence": 0.85},
+					}
+				}
+			}
+		}
+		adapter.write(payload)
+		read_back = adapter.read()
+		assert read_back == payload, f"write-read mismatch at iteration {i}"
+		assert not Path(f"{adapter.file_path}.tmp").exists(), f".tmp file leaked at iteration {i}"
+
+	file_size_bytes = adapter.file_path.stat().st_size
+	assert file_size_bytes < 1 * 1024 * 1024, (
+		f"JSON file size {file_size_bytes} bytes exceeds 1MB limit"
+	)
+
+
 def test_keyboard_adapter_queue_contract() -> None:
 	adapter = KeyboardAdapter(enable_stdin_poll=False)
 	adapter.push_simulated_event("BTN1_SHORT")

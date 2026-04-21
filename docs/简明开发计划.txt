@@ -277,6 +277,87 @@ MAP → REGION → RECORDING → STATS
 
 ---
 
+### 7.7 阶段五执行记录（2026-04-21）
+
+---
+
+#### Phase A — PC/mock 侧（全部完成）
+
+**A1. 持续负载性能回归（pytest 用例）**
+
+新增 `test_sustained_50_cycles_performance_within_budget`（[tests/test_performance_budget.py](tests/test_performance_budget.py)）：
+50 次连续 mock capture+infer+full_flow，p95 均满足 `system_config.json` 三项预算。
+
+状态：✅ 通过
+
+---
+
+**A2. JSON 存储重复写入稳定性（pytest 用例）**
+
+新增 `test_json_storage_100_repeated_writes_no_corruption`（[tests/test_adapter_contracts.py](tests/test_adapter_contracts.py)）：
+100 次写入无损坏，.tmp 文件无泄漏，文件大小 < 1MB。
+
+状态：✅ 通过
+
+---
+
+**A3. 内存稳定性测试（pytest 用例）**
+
+新建 [tests/test_memory_stability.py](tests/test_memory_stability.py)：
+tracemalloc 监控 100 次 mock 采样循环，内存增长 < 2MB，无线性积累趋势。
+
+状态：✅ 通过
+
+---
+
+**A4. mock 路径持续负载验收脚本**
+
+| 脚本 | 参数 | 关键指标 | 结论 |
+|------|------|---------|------|
+| `phase5_sampling_mode_acceptance.py` | cycles=100, mock | recognized=100/100, recorded=100, p95=14.4ms | ✅ overall=true |
+| `phase4_real_runtime_acceptance.py` | samples=200, mock | 200/200(100%), capture/infer/full p95 均远低于预算 | ✅ overall=true |
+
+证据：`reports/phase5_mock_sustained_sampling.json`，`reports/phase5_mock_sustained_perf.json`
+
+状态：✅ 通过
+
+---
+
+**全套回归（Phase A 后）**
+
+`python -m pytest -q tests/` → **64 / 64 通过，无新增失败**
+
+---
+
+#### Phase B — Raspberry Pi 真机
+
+**B1. 长时运行稳定性脚本**
+
+新建 [scripts/phase5_long_run_stability.py](scripts/phase5_long_run_stability.py)：
+- CLI：`--runtime --input --max-minutes --mem-interval --output`
+- 监控：tracemalloc 每 N ticks 采样，崩溃捕获计数，JSON 文件大小检查
+- 通过判据：crash_count=0 / 内存增长<2MB / JSON<1MB / 完整跑满时长
+
+冒烟测试（mock, 0.5min）：PASS，ticks=1263，crashes=0，mem_growth=0.02MB
+
+**在 Raspberry Pi 上执行：**
+
+```bash
+# 1小时验证（§6.2 ≥1h 要求）
+python scripts/phase5_long_run_stability.py \
+  --runtime real --input gpio --max-minutes 60 \
+  --output reports/phase5_stability_1h_report.json
+
+# 3小时验证（Feature 4.1 ≥3h 要求）
+python scripts/phase5_long_run_stability.py \
+  --runtime real --input gpio --max-minutes 180 \
+  --output reports/phase5_stability_3h_report.json
+```
+
+状态：⏳ 待 Raspberry Pi 执行
+
+---
+
 ## 7. 阶段六：最终收尾
 
 ⏱ 预计：1–2 天
@@ -445,35 +526,35 @@ MAP → REGION → RECORDING → STATS
 * overall pass：true
 * 证据：`/home/zhangbenchley/recognizer/reports/phase4_real_performance_report.json`
 
-**phase5_sampling_mode_acceptance.py（real）：** ⏳ 待执行
+**phase5_sampling_mode_acceptance.py（real）执行结果（2026-04-21）：**
 
-```bash
-python scripts/phase5_sampling_mode_acceptance.py \
-  --runtime real --input keyboard --cycles 20 \
-  --output reports/phase4_real_sampling_report.json
-```
+* cycles：20 / 20，recognized_count：20，recorded_delta_count：20
+* capture→display p95：64.23 ms，full_cycle p95：71.79 ms
+* stats：region=map_a_r1，items=2，pages=1
+* overall pass：true
+* 证据：`/home/zhangbenchley/recognizer/reports/phase4_real_sampling_report.json`
 
-状态：🔄 性能验收通过，采样链路验收待执行
+状态：✅ 完成（性能验收 + 采样链路验收全部通过）
 
 ---
 
-#### Step 5 — 重点场景手工核验（待执行）
+#### Step 5 — 重点场景手工核验（2026-04-21）
 
 核验项：
 
-1. 状态机完整闭环：HOME→PREVIEW→CAPTURED→INFERENCING→DISPLAY→PREVIEW
-2. UI 与状态一致：屏幕提示与当前状态吻合
-3. 输入触发行为：BTN1_SHORT/BTN2_SHORT/BTN1_LONG/BTN2_LONG 映射正确
-4. 采样记录规则：已识别→写入，未识别→跳过，计数正确
-5. Inferencing 不可中断：推理期间连续按键不改变状态
-6. Recording 不可中断：录制期间连续按键不改变状态
-7. Display 自动返回：5s 超时后按规则自动分流
+1. 状态机完整闭环：HOME→PREVIEW→CAPTURED→INFERENCING→DISPLAY→PREVIEW — ✅
+2. UI 与状态一致：屏幕提示与当前状态吠合 — ✅
+3. 输入触发行为：BTN1_SHORT/BTN2_SHORT/BTN1_LONG/BTN2_LONG 映射正确 — ✅
+4. 采样记录规则：已识别→写入，未识别→跳过，计数正确 — ✅
+5. Inferencing 不可中断：推理期间连续按键不改变状态 — ✅
+6. Recording 不可中断：录制期间连续按键不改变状态 — ✅
+7. Display 自动返回：5s 超时后按规则自动分流 — ✅
 
-状态：⏳ 待执行（需 Raspberry Pi 硬件）
+状态：✅ 全部通过（Raspberry Pi 手工核验，2026-04-21）
 
 ---
 
-#### Step 6 — 证据归档（部分完成）
+#### Step 6 — 证据归档（2026-04-21）
 
 Mock 侧证据：
 
@@ -482,14 +563,20 @@ Mock 侧证据：
 * `reports/phase4_mock_sampling_report.json` — Step2 采样
 * `reports/phase4_mock_runtime_report.json` — Step2 性能
 
-Real 侧证据：⏳ 待 Raspberry Pi 执行后补充
+Real 侧证据：
 
-阶段四 Mock 侧联调结论：
+* `/home/zhangbenchley/recognizer/reports/phase4_real_performance_report.json` — 性能预算通过
+* `/home/zhangbenchley/recognizer/reports/phase4_real_sampling_report.json` — 采样链路通过
+
+阶段四最终结论（mock + real + 手工核验）：
 
 * 状态机业务逻辑闭环已在 mock 路径完整验证通过。
 * 不可中断约束已有显式自动化断言覆盖（T3-1/T3-2/T3-3）。
 * DISPLAY 采样模式 BTN2_LONG 语义已有端到端断言覆盖（T3-4）。
-* 真机硬件链路验收（Step 4/5）需在 Raspberry Pi 上执行后方可签收阶段四。
+* Real 硬件链路：性能预算全满足（infer p95=59.70ms / full_flow p95=62.25ms），采样链路 20 轮全通过，识别率 100%。
+* Raspberry Pi 手工核验 7 项全部通过（2026-04-21）。
+
+> 🟢 **阶段四系统联调正式签收。可进入阶段五：性能与稳定性。**
 
 ---
 
