@@ -112,7 +112,9 @@ class AppController:
 		if processed >= self._max_events_per_tick:
 			self._logger.warning("max events per tick reached: %s", self._max_events_per_tick)
 
-		self._renderer.render(self._state_machine.current_state, self._state_machine.context)
+		render_state = self._state_machine.current_state
+		self._refresh_preview_frame(render_state)
+		self._renderer.render(render_state, self._state_machine.context)
 		return did_work
 
 	def request_stop(self) -> None:
@@ -130,6 +132,11 @@ class AppController:
 			self._recognition_service.shutdown()
 		except Exception:
 			self._logger.exception("failed to shutdown recognition service")
+
+		try:
+			self._renderer.close()
+		except Exception:
+			self._logger.exception("failed to close renderer")
 
 	def _poll_raw_inputs_safe(self):
 		try:
@@ -157,7 +164,30 @@ class AppController:
 			self._state_machine.context.set_error(exc)
 			return
 
+		self._state_machine.context.preview_frame = frame
 		event.payload["frame"] = frame
+
+	def _refresh_preview_frame(self, current_state: State) -> None:
+		if not self._renderer.needs_live_preview_frames:
+			return
+
+		ctx = self._state_machine.context
+
+		if current_state == State.PREVIEW:
+			try:
+				ctx.preview_frame = self._recognition_service.capture_frame()
+			except Exception as exc:
+				# Keep existing UI fallback behavior without forcing state transitions.
+				ctx.set_error(exc)
+				ctx.preview_error_flash_pending = True
+			return
+
+		if current_state in {State.CAPTURED, State.INFERENCING, State.DISPLAY, State.RECORDING}:
+			if ctx.last_captured_frame is not None:
+				ctx.preview_frame = ctx.last_captured_frame
+			return
+
+		ctx.preview_frame = None
 
 
 class _MockCameraAdapter(BaseCameraAdapter):
@@ -257,6 +287,7 @@ def build_app_controller(
 	*,
 	runtime_backend: str,
 	input_backend: str,
+	ui_backend: str = "text",
 	logger: logging.Logger,
 	storage_adapter_factory: Callable[..., Any] = JsonStorageAdapter,
 ) -> AppController:
@@ -317,7 +348,7 @@ def build_app_controller(
 
 	state_machine = StateMachine(context=StateContext(), handlers=handlers)
 	input_mapper = InputMapper()
-	renderer = Renderer(logger=logger)
+	renderer = Renderer(logger=logger, ui_backend=ui_backend)
 
 	return AppController(
 		state_machine=state_machine,

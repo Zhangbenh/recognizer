@@ -7,5 +7,9 @@ cd "$REPO_ROOT"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 INPUT_BACKEND="${INPUT_BACKEND:-gpio}"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
+UI_BACKEND="${UI_BACKEND:-screen}"
 
-exec "$PYTHON_BIN" app/main.py --runtime real --input "$INPUT_BACKEND" --log-level "$LOG_LEVEL" "$@"
+# camera prototype validated kmsdrm for current Waveshare HDMI setup.
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+
+exec "$PYTHON_BIN" app/main.py --runtime real --input "$INPUT_BACKEND" --ui-backend "$UI_BACKEND" --log-level "$LOG_LEVEL" "$@"

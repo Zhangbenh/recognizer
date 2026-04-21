@@ -44,7 +44,14 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 		"mode": ctx.mode,
 	}
 
-	if state == State.HOME:
+	if state == State.BOOTING:
+		base.update(
+			{
+				"title": "Plant Recognizer",
+				"status": "booting",
+			}
+		)
+	elif state == State.HOME:
 		base.update(
 			{
 				"selected_home_option": ctx.selected_home_option,
@@ -104,10 +111,25 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 		result = ctx.last_recognition_result
 		base.update(
 			{
+				"hint": "BACK_LONG: return" if ctx.mode == "normal" else "waiting auto-route...",
 				"display_name": result.display_name if result else None,
 				"plant_name": result.plant_name if result else None,
 				"confidence": result.confidence if result else None,
 				"is_recognized": result.is_recognized if result else False,
+			}
+		)
+	elif state == State.CAPTURED:
+		base.update(
+			{
+				"status": "captured",
+				"hint": "frame frozen",
+			}
+		)
+	elif state == State.INFERENCING:
+		base.update(
+			{
+				"status": "inferencing",
+				"hint": "AI inferencing...",
 			}
 		)
 	elif state == State.STATS:
@@ -144,6 +166,7 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 		result = ctx.last_recognition_result
 		base.update(
 			{
+				"status": "recording",
 				"selected_region_id": ctx.selected_region_id,
 				"display_name": result.display_name if result else None,
 				"plant_name": result.plant_name if result else None,

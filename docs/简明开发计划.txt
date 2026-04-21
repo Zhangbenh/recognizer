@@ -335,6 +335,7 @@ MAP → REGION → RECORDING → STATS
 备注：
 
 * 树莓派实机性能与硬件链路验收仍需在 real 模式执行。
+* 该项已在 7.5 记录中完成并通过。
 
 ---
 
@@ -351,16 +352,21 @@ MAP → REGION → RECORDING → STATS
 * `pytest` 阶段三相关套件：27/27 通过
 * `phase5_sampling_mode_acceptance.py`（mock）：overall=true
 * `run_mock.ps1 -MaxTicks 200`：退出码 0
+* `phase7_real_signoff_pi.sh`（real）：ALL SIGNOFF CHECKS PASSED
+  * Phase4 overall=true，Phase5 overall=true
+  * Phase5 counters：recognized_count=18，recorded_delta_count=18，stats_items_count=3
 
 结论：
 
-* 第三阶段总验收通过（mock 路径）
+* 第三阶段总验收通过（mock + real）
 
 证据：
 
 * `reports/phase7_stage3_pytest.xml`
 * `reports/phase7_stage3_sampling_report.json`
 * `reports/phase7_stage3_final_acceptance_report.json`
+* `reports/phase7_phase4_real_report.json`
+* `reports/phase7_phase5_real_report.json`
 * `docs/phase7_第三阶段总验收报告.txt`
 
 ---

@@ -32,7 +32,7 @@ tests/      自动化测试
 ### 3.2 树莓派实机（real）
 
 ```bash
-python3 app/main.py --runtime real --input gpio --log-level INFO
+SDL_VIDEODRIVER=kmsdrm python3 app/main.py --runtime real --input gpio --ui-backend screen --log-level INFO
 ```
 
 或者：
@@ -45,9 +45,22 @@ bash scripts/run_real_pi.sh
 
 - `--runtime`: `real` / `mock`
 - `--input`: `keyboard` / `gpio`
+- `--ui-backend`: `text` / `screen` / `both`
 - `--max-ticks`: 测试用最大 tick 数
 - `--idle-sleep`: 空闲 sleep 秒数
 - `--log-level`: `DEBUG/INFO/WARNING/ERROR`
+
+### 3.4 树莓派屏幕渲染依赖
+
+```bash
+sudo apt update
+sudo apt install -y python3-picamera2 python3-pygame
+```
+
+说明：
+
+- 当前 HDMI 小屏验证推荐 `SDL_VIDEODRIVER=kmsdrm`
+- 若无屏幕只保留日志输出，可使用 `--ui-backend text`
 
 ## 4. 输入映射
 

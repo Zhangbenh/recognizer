@@ -22,6 +22,7 @@ def mock_controller():
 	controller = app_main.build_controller(
 		runtime_backend="mock",
 		input_backend="keyboard",
+		ui_backend="text",
 		logger=logger,
 	)
 	try:

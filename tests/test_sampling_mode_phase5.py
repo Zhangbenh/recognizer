@@ -9,8 +9,12 @@ from domain.sampling_recorder import SamplingRecorder
 from domain.statistics_query_service import StatisticsQueryService
 from infrastructure.storage.json_storage_adapter import JsonStorageAdapter
 from infrastructure.storage.region_stats_repository import RegionStatsRepository
+from presentation.pages.booting_page import BootingPage
 from presentation.pages.error_page import ErrorPage
+from presentation.pages.home_page import HomePage
+from presentation.pages.inferencing_overlay import InferencingOverlay
 from presentation.pages.map_page import MapPage
+from presentation.pages.preview_page import PreviewPage
 from presentation.pages.region_page import RegionPage
 from presentation.pages.stats_page import StatsPage
 from presentation.renderer import Renderer
@@ -223,3 +227,35 @@ def test_error_page_render_non_retryable_message() -> None:
 
 	assert lines[0] == "[Error]"
 	assert any("actions: CONFIRM ignored (non-retryable)" in line for line in lines)
+
+
+def test_additional_state_pages_render_expected_headers() -> None:
+	ctx = StateContext(selected_home_option="sampling")
+
+	boot_lines = BootingPage.render(build_view_model(State.BOOTING, ctx))
+	home_lines = HomePage.render(build_view_model(State.HOME, ctx))
+	preview_lines = PreviewPage.render(build_view_model(State.PREVIEW, ctx))
+	infer_lines = InferencingOverlay.render(build_view_model(State.INFERENCING, ctx))
+
+	assert boot_lines[0] == "[Booting]"
+	assert home_lines[0] == "[Home]"
+	assert any("> sampling" in line for line in home_lines)
+	assert preview_lines[0] == "[Preview]"
+	assert infer_lines[0] == "[Inferencing]"
+
+
+def test_renderer_routes_for_booting_home_preview_inferencing() -> None:
+	renderer = Renderer(ui_backend="text")
+	emitted: list[list[str]] = []
+	renderer._emit = lambda lines: emitted.append(lines)
+	ctx = StateContext(selected_home_option="normal")
+
+	renderer.render(State.BOOTING, ctx)
+	renderer.render(State.HOME, ctx)
+	renderer.render(State.PREVIEW, ctx)
+	renderer.render(State.INFERENCING, ctx)
+
+	assert emitted[0][0] == "[Booting]"
+	assert emitted[1][0] == "[Home]"
+	assert emitted[2][0] == "[Preview]"
+	assert emitted[3][0] == "[Inferencing]"

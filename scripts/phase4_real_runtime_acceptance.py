@@ -114,6 +114,7 @@ def main() -> int:
 	controller = app_main.build_controller(
 		runtime_backend=args.runtime,
 		input_backend=args.input,
+		ui_backend="text",
 		logger=logger,
 	)
 

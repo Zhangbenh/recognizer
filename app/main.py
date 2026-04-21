@@ -14,10 +14,11 @@ def default_input_backend() -> str:
 	return "keyboard" if os.name == "nt" else "gpio"
 
 
-def build_controller(*, runtime_backend: str, input_backend: str, logger: logging.Logger) -> AppController:
+def build_controller(*, runtime_backend: str, input_backend: str, ui_backend: str, logger: logging.Logger) -> AppController:
 	return build_app_controller(
 		runtime_backend=runtime_backend,
 		input_backend=input_backend,
+		ui_backend=ui_backend,
 		logger=logger,
 		storage_adapter_factory=JsonStorageAdapter,
 	)
@@ -37,6 +38,12 @@ def parse_args() -> argparse.Namespace:
 		default=os.getenv("RECOGNIZER_INPUT", default_input_backend()),
 		help="input backend",
 	)
+	parser.add_argument(
+		"--ui-backend",
+		choices=("text", "screen", "both"),
+		default=os.getenv("RECOGNIZER_UI_BACKEND", "text"),
+		help="ui backend: text logger, pygame screen, or both",
+	)
 	parser.add_argument("--max-ticks", type=int, default=None, help="optional max loop ticks for testing")
 	parser.add_argument("--idle-sleep", type=float, default=0.02, help="sleep seconds when no work is done")
 	parser.add_argument("--log-level", type=str, default=os.getenv("RECOGNIZER_LOG_LEVEL", "INFO"))
@@ -46,7 +53,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
 	args = parse_args()
 	logger = create_logger(level=args.log_level)
-	controller = build_controller(runtime_backend=args.runtime, input_backend=args.input, logger=logger)
+	# Keep environment and runtime argument aligned for downstream components.
+	os.environ["RECOGNIZER_UI_BACKEND"] = args.ui_backend
+	controller = build_controller(
+		runtime_backend=args.runtime,
+		input_backend=args.input,
+		ui_backend=args.ui_backend,
+		logger=logger,
+	)
 	controller.run(max_ticks=args.max_ticks, idle_sleep_s=max(0.0, args.idle_sleep))
 	return 0
 
