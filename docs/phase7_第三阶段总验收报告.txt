@@ -22,6 +22,9 @@ Phase 7 第三阶段总验收报告
 3) 无卡死冒烟
    powershell -ExecutionPolicy Bypass -File scripts/run_mock.ps1 -MaxTicks 200 -LogLevel ERROR
 
+4) Phase 7 实机签收（real）
+   bash scripts/phase7_real_signoff_pi.sh
+
 验收结果
 --------
 - pytest: tests=27, passed=27, failed=0, errors=0, skipped=0
@@ -30,6 +33,10 @@ Phase 7 第三阶段总验收报告
   - recorded_delta_count=10
   - stats.items_count=1
 - run_mock 冒烟: 退出码 0
+- phase7_real_signoff_pi: ALL SIGNOFF CHECKS PASSED
+   - phase4 overall=true, phase5 overall=true
+   - phase4 p95/budget: capture=0.0023s/0.2000s, infer=0.0581s/2.5000s, full=0.0604s/3.0000s
+   - phase5 counters: recognized_count=18, recorded_delta_count=18, stats_items_count=3
 
 阶段判定
 --------
@@ -43,6 +50,8 @@ Phase 7 第三阶段总验收报告
 - reports/phase7_stage3_pytest.xml
 - reports/phase7_stage3_sampling_report.json
 - reports/phase7_stage3_final_acceptance_report.json
+- reports/phase7_phase4_real_report.json
+- reports/phase7_phase5_real_report.json
 
 可重复执行脚本
 ------------
@@ -50,5 +59,5 @@ Phase 7 第三阶段总验收报告
 
 说明
 ----
-- 本次为 Windows + mock 路径验收。
-- 树莓派 real 硬件链路（相机/GPIO/实机推理）请在目标设备上执行最终签收。
+- Windows + mock 路径已通过。
+- Raspberry Pi + real 硬件链路已完成签收并通过。

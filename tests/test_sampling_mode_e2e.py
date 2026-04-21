@@ -40,7 +40,12 @@ def isolated_sampling_controller(tmp_path, monkeypatch):
 	monkeypatch.setattr(app_main, "JsonStorageAdapter", _json_adapter_factory)
 
 	logger = create_logger(name="recognizer.tests.phase5", level="ERROR")
-	controller = app_main.build_controller(runtime_backend="mock", input_backend="keyboard", logger=logger)
+	controller = app_main.build_controller(
+		runtime_backend="mock",
+		input_backend="keyboard",
+		ui_backend="text",
+		logger=logger,
+	)
 	try:
 		yield controller
 	finally:

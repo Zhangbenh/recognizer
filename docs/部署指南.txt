@@ -16,13 +16,14 @@ Plant Recognizer 部署指南
 
 2.2 树莓派额外依赖
 - 摄像头库：python3-picamera2
+- 屏幕渲染库：python3-pygame
 - GPIO 库：python3-rpi.gpio
 - 推理运行时：ai-edge-litert（优先）
 
 推荐安装命令（Raspberry Pi）：
 
 sudo apt update
-sudo apt install -y python3-picamera2 python3-rpi.gpio
+sudo apt install -y python3-picamera2 python3-pygame python3-rpi.gpio
 python3 -m pip install --upgrade pip
 python3 -m pip install ai-edge-litert numpy pillow
 
@@ -54,11 +55,15 @@ powershell -ExecutionPolicy Bypass -File scripts/run_mock.ps1
 
 4.2 Raspberry Pi（real）
 
-python3 app/main.py --runtime real --input gpio --log-level INFO
+SDL_VIDEODRIVER=kmsdrm python3 app/main.py --runtime real --input gpio --ui-backend screen --log-level INFO
 
 或：
 
 bash scripts/run_real_pi.sh
+
+说明：
+- 若只需要终端日志，可改为 `--ui-backend text`
+- 若希望同时保留日志和屏幕画面，可使用 `--ui-backend both`
 
 
 5. 验收命令

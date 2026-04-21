@@ -21,6 +21,7 @@ class StateContext:
 	selected_region_id: Optional[str] = None
 	selected_region_index: Optional[int] = None
 	selected_stats_page_index: int = 0
+	preview_frame: Any = None
 	last_captured_frame: Any = None
 	last_recognition_result: Optional[RecognitionResult] = None
 	last_error: Optional[ErrorInfo] = None
@@ -45,6 +46,7 @@ class StateContext:
 			self.selected_home_option = HOME_OPTION_NORMAL
 
 	def clear_flow_transients(self) -> None:
+		self.preview_frame = None
 		self.last_captured_frame = None
 		self.last_recognition_result = None
 		self.display_deadline = None
