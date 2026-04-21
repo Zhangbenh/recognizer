@@ -1,0 +1,65 @@
+{
+  "generated_at": "2026-04-21T09:41:08.977456+00:00",
+  "runtime": "mock",
+  "input_backend": "keyboard",
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64",
+    "python": "3.14.0"
+  },
+  "sampling": {
+    "samples": 200,
+    "warmup": 5,
+    "sleep_s": 0.0,
+    "boot_elapsed_s": 0.0009410000056959689
+  },
+  "budget_s": {
+    "capture_s": 0.2,
+    "infer_s": 2.5,
+    "full_flow_s": 3.0
+  },
+  "metrics": {
+    "capture_s": {
+      "count": 200,
+      "min_s": 9.998620953410864e-08,
+      "max_s": 1.8999999156221747e-06,
+      "mean_s": 2.344993845326826e-07,
+      "median_s": 2.00001522898674e-07,
+      "p95_s": 4.00003045797348e-07,
+      "p99_s": 8.089916082098999e-07,
+      "stdev_s": 1.831928667429305e-07
+    },
+    "infer_s": {
+      "count": 200,
+      "min_s": 2.6000052457675338e-06,
+      "max_s": 4.5199994929134846e-05,
+      "mean_s": 4.559500812320039e-06,
+      "median_s": 4.1000021155923605e-06,
+      "p95_s": 6.41499063931405e-06,
+      "p99_s": 2.6629998174030216e-05,
+      "stdev_s": 4.2890571145412145e-06
+    },
+    "full_flow_s": {
+      "count": 200,
+      "min_s": 2.7999922167509794e-06,
+      "max_s": 4.539999645203352e-05,
+      "mean_s": 4.794000196852721e-06,
+      "median_s": 4.3000036384910345e-06,
+      "p95_s": 6.709992885589596e-06,
+      "p99_s": 2.8320996498223283e-05,
+      "stdev_s": 4.365267752196448e-06
+    }
+  },
+  "recognition": {
+    "recognized_count": 200,
+    "recognized_ratio": 1.0,
+    "average_confidence": 0.92
+  },
+  "pass": {
+    "capture_p95": true,
+    "infer_p95": true,
+    "full_flow_p95": true,
+    "overall": true
+  }
+}

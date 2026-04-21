@@ -1,0 +1,148 @@
+{
+  "generated_at": "2026-04-21T09:45:52.374815+00:00",
+  "runtime": "mock",
+  "input_backend": "keyboard",
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64",
+    "python": "3.14.0"
+  },
+  "config": {
+    "max_minutes": 0.5,
+    "mem_interval_ticks": 100,
+    "idle_sleep_ms": 20.0
+  },
+  "run": {
+    "total_elapsed_s": 30.02,
+    "total_elapsed_min": 0.5,
+    "tick_count": 1263,
+    "error_count": 0,
+    "crash_count": 0
+  },
+  "memory": {
+    "baseline_kb": 0.0,
+    "final_kb": 22.2,
+    "peak_kb": 146.6,
+    "growth_kb": 22.2,
+    "growth_mb": 0.022,
+    "snapshots": [
+      {
+        "tick": 100,
+        "elapsed_s": 2.3,
+        "current_kb": 18.8,
+        "growth_kb": 18.8,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 200,
+        "elapsed_s": 4.4,
+        "current_kb": 19.0,
+        "growth_kb": 19.0,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 300,
+        "elapsed_s": 7.1,
+        "current_kb": 19.2,
+        "growth_kb": 19.2,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 400,
+        "elapsed_s": 9.4,
+        "current_kb": 19.4,
+        "growth_kb": 19.4,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 500,
+        "elapsed_s": 11.7,
+        "current_kb": 19.7,
+        "growth_kb": 19.7,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 600,
+        "elapsed_s": 13.9,
+        "current_kb": 20.0,
+        "growth_kb": 20.0,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 700,
+        "elapsed_s": 16.1,
+        "current_kb": 20.3,
+        "growth_kb": 20.3,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 800,
+        "elapsed_s": 18.4,
+        "current_kb": 20.6,
+        "growth_kb": 20.6,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 900,
+        "elapsed_s": 21.4,
+        "current_kb": 20.9,
+        "growth_kb": 20.9,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 1000,
+        "elapsed_s": 23.9,
+        "current_kb": 21.3,
+        "growth_kb": 21.3,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 1100,
+        "elapsed_s": 26.3,
+        "current_kb": 21.6,
+        "growth_kb": 21.6,
+        "peak_kb": 146.6
+      },
+      {
+        "tick": 1200,
+        "elapsed_s": 28.6,
+        "current_kb": 21.9,
+        "growth_kb": 21.9,
+        "peak_kb": 146.6
+      }
+    ]
+  },
+  "storage": {
+    "stats_json_path": "C:\\Users\\31702\\Desktop\\recognizer\\recognizer\\data\\sampling_records.json",
+    "json_size_bytes": 350
+  },
+  "criteria": {
+    "no_crash": {
+      "pass": true,
+      "crash_count": 0
+    },
+    "memory_growth_lt_2mb": {
+      "pass": true,
+      "growth_mb": 0.022,
+      "limit_mb": 2.0
+    },
+    "json_size_lt_1mb": {
+      "pass": true,
+      "size_bytes": 350,
+      "limit_bytes": 1048576
+    },
+    "duration_completed": {
+      "pass": true,
+      "elapsed_s": 30.02,
+      "required_s": 30.0
+    }
+  },
+  "pass": {
+    "no_crash": true,
+    "memory": true,
+    "json_size": true,
+    "duration": true,
+    "overall": true
+  }
+}
