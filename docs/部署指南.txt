@@ -66,6 +66,7 @@ bash scripts/run_real_pi.sh
 - 若希望同时保留日志和屏幕画面，可使用 `--ui-backend both`
 - 黑边优化默认已开启：`RECOGNIZER_SCREEN_FULLSCREEN=1` 与 `RECOGNIZER_SCREEN_FILL=1`
 - 如需手动旋转屏幕预览，可设置 `RECOGNIZER_PREVIEW_ROTATION=90/180/270`
+- 字体大小可通过 `RECOGNIZER_UI_SCALE` 调节（默认 1.25，建议范围 1.1~1.6）
 
 
 5. 验收命令
