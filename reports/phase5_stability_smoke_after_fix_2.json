@@ -1,0 +1,101 @@
+{
+  "generated_at": "2026-04-22T03:20:14.356272+00:00",
+  "runtime": "mock",
+  "input_backend": "keyboard",
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64",
+    "python": "3.14.0"
+  },
+  "config": {
+    "max_minutes": 0.03,
+    "mem_interval_ticks": 100,
+    "idle_sleep_ms": 20.0,
+    "boot_timeout_s": 30.0,
+    "health_probe_interval_s": 1.0
+  },
+  "run": {
+    "boot_elapsed_s": 0.615,
+    "boot_state": "HOME",
+    "total_elapsed_s": 1.82,
+    "total_elapsed_min": 0.03,
+    "tick_count": 67,
+    "error_count": 0,
+    "crash_count": 0,
+    "visited_states": [
+      "HOME"
+    ],
+    "activity_scope": "post_boot_capture_infer_probes"
+  },
+  "memory": {
+    "baseline_kb": 0.0,
+    "final_kb": 1.0,
+    "peak_kb": 1.8,
+    "growth_kb": 1.0,
+    "growth_mb": 0.001,
+    "measurement_scope": "post_boot_runtime_only",
+    "snapshots": []
+  },
+  "health_probes": {
+    "count": 1,
+    "failures": 0,
+    "last": {
+      "capture_s": 9.899988071992993e-06,
+      "infer_s": 0.0002426000137347728,
+      "full_s": 0.0002525000018067658,
+      "recognized": true,
+      "confidence": 0.92,
+      "display_name": "Aloe Vera"
+    },
+    "history": [
+      {
+        "elapsed_s": 1.0,
+        "capture_ms": 0.01,
+        "infer_ms": 0.24,
+        "full_ms": 0.25,
+        "recognized": true,
+        "confidence": 0.92,
+        "display_name": "Aloe Vera"
+      }
+    ]
+  },
+  "storage": {
+    "stats_json_path": "C:\\Users\\31702\\Desktop\\recognizer\\recognizer\\data\\sampling_records.json",
+    "json_size_bytes": 350
+  },
+  "criteria": {
+    "no_crash": {
+      "pass": true,
+      "crash_count": 0
+    },
+    "memory_growth_lt_2mb": {
+      "pass": true,
+      "growth_mb": 0.001,
+      "limit_mb": 2.0
+    },
+    "health_probes_ok": {
+      "pass": true,
+      "count": 1,
+      "failures": 0
+    },
+    "json_size_lt_1mb": {
+      "pass": true,
+      "size_bytes": 350,
+      "limit_bytes": 1048576
+    },
+    "duration_completed": {
+      "pass": true,
+      "elapsed_s": 1.82,
+      "required_s": 1.7999999999999998
+    }
+  },
+  "pass": {
+    "no_crash": true,
+    "memory": true,
+    "health_probes": true,
+    "json_size": true,
+    "duration": true,
+    "overall": true
+  }
+}

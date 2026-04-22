@@ -2,13 +2,15 @@
 
 Drives AppController for a configurable duration (--max-minutes) and reports:
 - Total ticks executed, errors encountered, crash count
-- Memory growth via tracemalloc (sampled every --mem-interval ticks)
+- Post-boot Python memory growth via tracemalloc (sampled every --mem-interval ticks)
+- Periodic capture+infer health probes for the live camera/inference chain
 - JSON storage file size at end
 - Whether stability criteria are met
 
 Stability pass criteria:
   - crash_count == 0
-  - memory growth < 2 MB over the full run
+    - post-boot memory growth < 2 MB over the measured runtime window
+    - health probe failures == 0
   - json_size_bytes < 1MB (system_config constraint)
 
 Run modes:
@@ -36,6 +38,7 @@ if str(APP_DIR) not in sys.path:
 
 
 import main as app_main
+from application.states import State
 from infrastructure.logging.logger import create_logger
 from infrastructure.storage.json_storage_adapter import JsonStorageAdapter
 
@@ -63,6 +66,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--idle-sleep-ms", type=float, default=20.0,
         help="sleep between ticks when idle (milliseconds)",
+    )
+    parser.add_argument(
+        "--boot-timeout-s", type=float, default=30.0,
+        help="timeout for BOOTING to settle into HOME or ERROR",
+    )
+    parser.add_argument(
+        "--health-probe-interval-s", type=float, default=30.0,
+        help="run capture+infer health probe every N seconds (0 disables probes)",
     )
     parser.add_argument(
         "--output", type=str,
@@ -95,6 +106,46 @@ def _find_stats_json(repo_root: Path) -> Path | None:
     return None
 
 
+def _tick_until_boot_ready(controller, *, idle_sleep_s: float, timeout_s: float) -> tuple[float, State]:
+    """Drive the runtime until BOOTING settles into HOME or ERROR."""
+    boot_start = time.monotonic()
+    controller._state_machine.start()
+
+    while True:
+        current_state = controller._state_machine.current_state
+        if current_state in {State.HOME, State.ERROR}:
+            return time.monotonic() - boot_start, current_state
+
+        if time.monotonic() - boot_start >= timeout_s:
+            raise TimeoutError(
+                f"boot did not settle within {timeout_s:.1f}s; current_state={current_state.value}"
+            )
+
+        did_work = controller.tick()
+        if not did_work and idle_sleep_s > 0:
+            time.sleep(idle_sleep_s)
+
+
+def _run_health_probe(controller) -> dict[str, Any]:
+    """Exercise capture+infer so long-run checks cover the live hardware chain."""
+    recognition_service = controller._recognition_service
+
+    capture_start = time.perf_counter()
+    frame = recognition_service.capture_frame()
+    after_capture = time.perf_counter()
+    result = recognition_service.recognize(frame)
+    after_infer = time.perf_counter()
+
+    return {
+        "capture_s": after_capture - capture_start,
+        "infer_s": after_infer - after_capture,
+        "full_s": after_infer - capture_start,
+        "recognized": bool(result.is_recognized),
+        "confidence": float(result.confidence),
+        "display_name": result.display_name,
+    }
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -115,21 +166,44 @@ def main() -> int:
         logger=logger,
     )
 
-    # ── tracemalloc setup ─────────────────────────────────────────────────────
-    tracemalloc.start()
-    baseline_current, _ = tracemalloc.get_traced_memory()
-    mem_snapshots: list[dict[str, Any]] = []
-
     # ── run loop ──────────────────────────────────────────────────────────────
     tick_count = 0
     error_count = 0
     crash_count = 0
-    run_start = time.monotonic()
+    health_probe_count = 0
+    health_probe_failures = 0
+    health_probe_last: dict[str, Any] | None = None
+    health_probe_history: list[dict[str, Any]] = []
+    mem_snapshots: list[dict[str, Any]] = []
+    visited_states: set[str] = set()
 
-    controller._state_machine.start()
+    boot_elapsed_s, boot_state = _tick_until_boot_ready(
+        controller,
+        idle_sleep_s=idle_sleep_s,
+        timeout_s=max(1.0, args.boot_timeout_s),
+    )
+    if boot_state == State.ERROR:
+        raise RuntimeError("boot failed; state machine settled in ERROR")
+
+    # Measure runtime growth after one-time boot allocations have settled.
+    tracemalloc.start()
+    baseline_current, _ = tracemalloc.get_traced_memory()
+    run_start = time.monotonic()
+    next_health_probe_elapsed_s = max(0.0, args.health_probe_interval_s)
 
     print(f"[stability] starting run — max_minutes={args.max_minutes:.0f}, "
           f"runtime={args.runtime}", flush=True)
+    if args.health_probe_interval_s > 0:
+        print(
+            f"[stability] boot settled in {boot_elapsed_s:.2f}s; "
+            f"health_probe_interval={args.health_probe_interval_s:.1f}s",
+            flush=True,
+        )
+    else:
+        print(
+            f"[stability] boot settled in {boot_elapsed_s:.2f}s; health probes disabled",
+            flush=True,
+        )
 
     try:
         while True:
@@ -151,8 +225,36 @@ def main() -> int:
 
             # Count state-machine errors without crashing
             sm_state = controller._state_machine.current_state.value
+            visited_states.add(sm_state)
             if sm_state == "ERROR":
                 error_count += 1
+
+            if args.health_probe_interval_s > 0 and elapsed >= next_health_probe_elapsed_s:
+                try:
+                    health_probe_last = _run_health_probe(controller)
+                    health_probe_count += 1
+                    health_probe_history.append(
+                        {
+                            "elapsed_s": round(elapsed, 1),
+                            "capture_ms": round(health_probe_last["capture_s"] * 1000.0, 2),
+                            "infer_ms": round(health_probe_last["infer_s"] * 1000.0, 2),
+                            "full_ms": round(health_probe_last["full_s"] * 1000.0, 2),
+                            "recognized": health_probe_last["recognized"],
+                            "confidence": round(health_probe_last["confidence"], 4),
+                            "display_name": health_probe_last["display_name"],
+                        }
+                    )
+                except Exception as exc:
+                    health_probe_failures += 1
+                    logger.error("health probe failed at tick %d: %s", tick_count, exc)
+                    print(
+                        f"[stability] health_probe_failed elapsed={elapsed/60:.1f}min "
+                        f"tick={tick_count} reason={exc}",
+                        flush=True,
+                    )
+                    break
+
+                next_health_probe_elapsed_s += args.health_probe_interval_s
 
             # Memory snapshot
             if tick_count % args.mem_interval == 0:
@@ -199,9 +301,16 @@ def main() -> int:
 
     pass_no_crash = crash_count == 0
     pass_memory = memory_growth_mb < MEM_GROWTH_LIMIT_MB
+    pass_health_probes = health_probe_failures == 0
     pass_json_size = (json_size_bytes is None) or (json_size_bytes < JSON_SIZE_LIMIT_BYTES)
     pass_duration = total_elapsed_s >= (max_seconds * 0.99)  # allow 1% tolerance
-    pass_overall = pass_no_crash and pass_memory and pass_json_size and pass_duration
+    pass_overall = (
+        pass_no_crash
+        and pass_memory
+        and pass_health_probes
+        and pass_json_size
+        and pass_duration
+    )
 
     # ── report ────────────────────────────────────────────────────────────────
     report: dict[str, Any] = {
@@ -218,13 +327,19 @@ def main() -> int:
             "max_minutes": args.max_minutes,
             "mem_interval_ticks": args.mem_interval,
             "idle_sleep_ms": args.idle_sleep_ms,
+            "boot_timeout_s": args.boot_timeout_s,
+            "health_probe_interval_s": args.health_probe_interval_s,
         },
         "run": {
+            "boot_elapsed_s": round(boot_elapsed_s, 3),
+            "boot_state": boot_state.value,
             "total_elapsed_s": round(total_elapsed_s, 2),
             "total_elapsed_min": round(total_elapsed_s / 60, 2),
             "tick_count": tick_count,
             "error_count": error_count,
             "crash_count": crash_count,
+            "visited_states": sorted(visited_states),
+            "activity_scope": "post_boot_capture_infer_probes" if args.health_probe_interval_s > 0 else "post_boot_idle_only",
         },
         "memory": {
             "baseline_kb": round(baseline_current / 1024, 1),
@@ -232,7 +347,14 @@ def main() -> int:
             "peak_kb": round(final_peak / 1024, 1),
             "growth_kb": round(memory_growth_kb, 1),
             "growth_mb": round(memory_growth_mb, 3),
+            "measurement_scope": "post_boot_runtime_only",
             "snapshots": mem_snapshots,
+        },
+        "health_probes": {
+            "count": health_probe_count,
+            "failures": health_probe_failures,
+            "last": health_probe_last,
+            "history": health_probe_history,
         },
         "storage": {
             "stats_json_path": str(stats_json_path) if stats_json_path else None,
@@ -244,6 +366,11 @@ def main() -> int:
                 "pass": pass_memory,
                 "growth_mb": round(memory_growth_mb, 3),
                 "limit_mb": MEM_GROWTH_LIMIT_MB,
+            },
+            "health_probes_ok": {
+                "pass": pass_health_probes,
+                "count": health_probe_count,
+                "failures": health_probe_failures,
             },
             "json_size_lt_1mb": {
                 "pass": pass_json_size,
@@ -259,6 +386,7 @@ def main() -> int:
         "pass": {
             "no_crash": pass_no_crash,
             "memory": pass_memory,
+            "health_probes": pass_health_probes,
             "json_size": pass_json_size,
             "duration": pass_duration,
             "overall": pass_overall,
@@ -274,7 +402,7 @@ def main() -> int:
     print(
         f"\n[stability] {status} | elapsed={total_elapsed_s/60:.1f}min "
         f"ticks={tick_count} crashes={crash_count} "
-        f"mem_growth={memory_growth_mb:.2f}MB",
+        f"mem_growth={memory_growth_mb:.2f}MB health_probes={health_probe_count}/{health_probe_failures}",
         flush=True,
     )
     print(f"[stability] report: {output_path}", flush=True)

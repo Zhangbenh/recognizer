@@ -1,0 +1,118 @@
+{
+  "generated_at": "2026-04-22T03:19:26.158883+00:00",
+  "runtime": "mock",
+  "input_backend": "keyboard",
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64",
+    "python": "3.14.0"
+  },
+  "config": {
+    "max_minutes": 0.05,
+    "mem_interval_ticks": 100,
+    "idle_sleep_ms": 20.0,
+    "boot_timeout_s": 30.0,
+    "health_probe_interval_s": 1.0
+  },
+  "run": {
+    "boot_elapsed_s": 0.003,
+    "boot_state": "HOME",
+    "total_elapsed_s": 3.03,
+    "total_elapsed_min": 0.05,
+    "tick_count": 140,
+    "error_count": 0,
+    "crash_count": 0,
+    "visited_states": [
+      "HOME"
+    ],
+    "activity_scope": "post_boot_capture_infer_probes"
+  },
+  "memory": {
+    "baseline_kb": 0.0,
+    "final_kb": 1.6,
+    "peak_kb": 2.4,
+    "growth_kb": 1.6,
+    "growth_mb": 0.002,
+    "measurement_scope": "post_boot_runtime_only",
+    "snapshots": [
+      {
+        "tick": 100,
+        "elapsed_s": 2.1,
+        "current_kb": 1.4,
+        "growth_kb": 1.4,
+        "peak_kb": 2.2
+      }
+    ]
+  },
+  "health_probes": {
+    "count": 2,
+    "failures": 0,
+    "last": {
+      "capture_s": 9.199982741847634e-06,
+      "infer_s": 0.000284800014924258,
+      "full_s": 0.00029399999766610563,
+      "recognized": true,
+      "confidence": 0.92,
+      "display_name": "Aloe Vera"
+    },
+    "history": [
+      {
+        "elapsed_s": 1.0,
+        "capture_ms": 0.01,
+        "infer_ms": 0.1,
+        "full_ms": 0.11,
+        "recognized": true,
+        "confidence": 0.92,
+        "display_name": "Aloe Vera"
+      },
+      {
+        "elapsed_s": 2.0,
+        "capture_ms": 0.01,
+        "infer_ms": 0.28,
+        "full_ms": 0.29,
+        "recognized": true,
+        "confidence": 0.92,
+        "display_name": "Aloe Vera"
+      }
+    ]
+  },
+  "storage": {
+    "stats_json_path": "C:\\Users\\31702\\Desktop\\recognizer\\recognizer\\data\\sampling_records.json",
+    "json_size_bytes": 350
+  },
+  "criteria": {
+    "no_crash": {
+      "pass": true,
+      "crash_count": 0
+    },
+    "memory_growth_lt_2mb": {
+      "pass": true,
+      "growth_mb": 0.002,
+      "limit_mb": 2.0
+    },
+    "health_probes_ok": {
+      "pass": true,
+      "count": 2,
+      "failures": 0
+    },
+    "json_size_lt_1mb": {
+      "pass": true,
+      "size_bytes": 350,
+      "limit_bytes": 1048576
+    },
+    "duration_completed": {
+      "pass": true,
+      "elapsed_s": 3.03,
+      "required_s": 3.0
+    }
+  },
+  "pass": {
+    "no_crash": true,
+    "memory": true,
+    "health_probes": true,
+    "json_size": true,
+    "duration": true,
+    "overall": true
+  }
+}
