@@ -1,21 +1,24 @@
 # Plant Recognizer
 
-便携式离线植物识别器，基于单线程事件驱动状态机，支持普通模式与采样模式。
+便携式植物识别与区域采样系统，基于单线程事件驱动状态机，默认中文显示，支持云端优先识别与本地回退。
 
 ## 1. 功能概览
 
-- 普通模式：`HOME -> PREVIEW -> CAPTURED -> INFERENCING -> DISPLAY -> PREVIEW`
+- 普通模式：`HOME -> PREVIEW -> CAPTURED -> INFERENCING -> DISPLAY -> PREVIEW`，在 `INFERENCING` 内执行云端优先识别与本地回退
 - 采样模式：`HOME -> MAP_SELECT -> REGION_SELECT -> PREVIEW -> CAPTURED -> INFERENCING -> DISPLAY -> RECORDING -> PREVIEW`
+- 地图统计：`MAP_SELECT -> MAP_STATS -> MAP_SELECT`
 - 错误处理：启动期致命错误进入 `ERROR`，运行期非致命错误提示后回安全状态
-- 数据持久化：本地 JSON（按 region 聚合统计）
+- 数据持久化：本地 JSON（`data/sampling_records.json`，按 region 分区存储，可做地图级聚合）
+- 屏幕后端：地图页和区域页可升级为图片化选择页，文本后端继续保留用于测试与回归
 
 ## 2. 目录结构
 
 ```text
 app/        应用主代码
-config/     配置文件（labels/model_manifest/sampling/system）
+config/     配置文件（labels/model_manifest/sampling/system/cloud/mapping）
 models/     模型文件
 data/       运行时数据（sampling_records.json）
+assets/     字体与地图/区域图片资源
 docs/       设计文档与验收文档
 scripts/    验收脚本与运行脚本
 tests/      自动化测试
@@ -49,6 +52,11 @@ bash scripts/run_real_pi.sh
 - `--max-ticks`: 测试用最大 tick 数
 - `--idle-sleep`: 空闲 sleep 秒数
 - `--log-level`: `DEBUG/INFO/WARNING/ERROR`
+
+说明：
+
+- v1.1 口径下默认识别策略为云端优先；云端不可用或请求失败时应自动回退本地模型
+- 云端凭据与映射配置见 `config/cloud_config.json` 与 `config/baidu_plant_mapping.json`
 
 ### 3.4 树莓派屏幕渲染依赖
 
@@ -117,3 +125,4 @@ powershell -ExecutionPolicy Bypass -File scripts/phase6_release_check.ps1
 - `docs/状态机设计_v2.0.txt`
 - `docs/代码结构设计文档_v1.3.1.txt`
 - `docs/用户故事及验收标准_v3.txt`
+- `docs/v1.1_补丁开发文档.txt`

@@ -4,6 +4,20 @@
 
 ---
 
+# v1.1 补丁回填说明
+
+自 v1.1 起，本文件在保留单线程状态机、适配器隔离、状态驱动 UI 与本地 JSON 持久化的前提下，新增以下结构性回填要求：
+
+- 识别链路改为“云端优先，本地回退”
+- 新增 `MAP_STATS` 业务状态及其 handler / page / view model 路由
+- 新增云端配置仓库、百度名称映射仓库与云端客户端模块
+- 新增项目内 `assets/` 目录承载中文字体和地图/区域图片资源
+- 统计主键继续统一为 `plant_key` 字符串，但允许云端扩展命名空间键
+
+若本文旧版条目与上述回填要求冲突，以本节及后续修订章节为准。
+
+---
+
 # 0. 文档定位
 
 本文件是本项目在“状态机详细设计完成之后”的**代码结构唯一实现依据**。  
@@ -14,7 +28,7 @@
 > **代码应该如何组织，模块应该如何划分，类应该如何定义，接口应该如何收口，依赖应该如何流动。**
 
 本文件不再讨论需求是否合理，也不再重复架构设计与状态机设计的高层决策；它只负责把这些冻结决策**落实为可以直接编码的代码结构**。本项目的整体架构基线已经固定为：单线程状态机驱动、适配器隔离外部依赖、状态驱动 UI、领域规则约束识别/记录/统计、本地 JSON 持久化、显式错误回退与发布门禁。 :contentReference[oaicite:0]{index=0}  
-状态机实现基线已经固定为：单线程、单事件队列、唯一合法状态集合、固定事件来源矩阵、`STATS` 入口固定、`INFERENCING/RECORDING` 不可中断、`DISPLAY` 在采样模式下不可跳过记录。 
+状态机实现基线已经固定为：单线程、单事件队列、唯一合法状态集合、固定事件来源矩阵、区域统计入口 `REGION_SELECT -> STATS`、地图汇总统计入口 `MAP_SELECT -> MAP_STATS`、`INFERENCING/RECORDING` 不可中断、`DISPLAY` 在采样模式下不可跳过记录。 
 
 ---
 
@@ -92,7 +106,7 @@
 - 不允许让 UI 决策流程
 - 不允许让 Adapter 改状态
 - 不允许把 `DISPLAY` 与 `RECORDING` 合并成一个结构层面的单元
-- 不允许开放 `STATS` 的第二入口
+- 不允许在 `MAP_SELECT` / `REGION_SELECT` 之外开放额外统计入口
 - 不允许把 `RETRY_PRESS` 暴露成物理按键
 
 这些都已经在两份基线中被冻结。 
@@ -437,6 +451,7 @@ app/
       booting_handler.py
       home_handler.py
       map_select_handler.py
+      map_stats_handler.py
       region_select_handler.py
       preview_handler.py
       captured_handler.py
@@ -459,6 +474,10 @@ app/
 
   infrastructure/
     __init__.py
+
+    cloud/
+      __init__.py
+      baidu_plant_client.py
 
     camera/
       __init__.py
@@ -487,6 +506,8 @@ app/
       sampling_config_repository.py
       label_repository.py
       model_manifest_repository.py
+      cloud_config_repository.py
+      baidu_mapping_repository.py
 
     logging/
       __init__.py
@@ -502,6 +523,7 @@ app/
       booting_page.py
       home_page.py
       map_page.py
+      map_stats_page.py
       region_page.py
       preview_page.py
       inferencing_overlay.py
@@ -513,9 +535,16 @@ config/
   system_config.json
   labels.json
   sampling_config.json
+  cloud_config.json
+  baidu_plant_mapping.json
   model_manifest.json
 
 data/
+  sampling_records.json
+
+assets/
+  fonts/
+  maps/
   regions/
 
 logs/
@@ -750,6 +779,7 @@ class State(Enum):
     BOOTING = auto()
     HOME = auto()
     MAP_SELECT = auto()
+  MAP_STATS = auto()
     REGION_SELECT = auto()
     PREVIEW = auto()
     CAPTURED = auto()
@@ -872,7 +902,7 @@ class Event(Enum):
 
 ```python
 from dataclasses import dataclass
-from domain.models import RecognitionResult, RegionStatsFile
+from domain.models import RecognitionResult, StatsSnapshot, MapStatsSnapshot
 from domain.errors import AppError
 
 @dataclass
@@ -887,6 +917,7 @@ class StateContext:
     selected_region_index: int | None = None
 
     selected_stats_page_index: int = 0
+    selected_map_stats_page_index: int = 0
 
     last_captured_frame: object | None = None
     last_recognition_result: RecognitionResult | None = None
@@ -898,7 +929,8 @@ class StateContext:
     infer_deadline: float | None = None
     record_deadline: float | None = None
 
-    current_stats_snapshot: RegionStatsFile | None = None
+    current_stats_snapshot: StatsSnapshot | None = None
+    current_map_stats_snapshot: MapStatsSnapshot | None = None
 ```
 
 ### 字段解释
@@ -928,6 +960,11 @@ class StateContext:
 
 * 统计页当前页码
 * 每次进入 `STATS` 应强制归零
+
+#### `selected_map_stats_page_index`
+
+* 地图统计页当前页码
+* 每次进入 `MAP_STATS` 应强制归零
 
 #### `last_captured_frame`
 
@@ -959,11 +996,16 @@ class StateContext:
 * 当前区域统计快照
 * 供 `STATS` 渲染使用
 
+#### `current_map_stats_snapshot`
+
+* 当前地图统计快照
+* 供 `MAP_STATS` 渲染使用
+
 ### 明确边界
 
 * `StateContext` 不落盘
 * `StateContext` 不应被 UI 私有持有和复制成第二套状态
-* `StateContext` 不能替代 `RegionStatsFile`
+* `StateContext` 不能替代 `StatsSnapshot / MapStatsSnapshot`
 
 ---
 
@@ -1159,7 +1201,7 @@ class TimeoutScheduler:
 
 根据状态机文档，业务超时只适用于： 
 
-* `INFERENCING`：3 秒
+* `INFERENCING`：4.5 秒
 * `DISPLAY`：5 秒
 * `RECORDING`：1 秒
 
@@ -1484,7 +1526,7 @@ class BaseStateHandler(Protocol):
 
 ### 对应要求
 
-状态机文档已冻结 `INFERENCING > 3 秒 -> 失败处理`，且推理中不可中断。
+状态机文档已冻结 `INFERENCING > 4.5 秒 -> 失败处理`，且推理中不可中断。
 
 ---
 
@@ -1889,7 +1931,8 @@ class SamplingRecorder:
 
 这些都来自架构文档： 
 
-* 唯一键：`plant_name + region_id`
+* 唯一键：`plant_key + region_id`
+* 未映射云端植物允许使用稳定命名空间 `plant_key`
 * 已存在则 `count + 1`
 * 即使短时间重复识别也计数
 * `count` 最大 999
@@ -2684,7 +2727,7 @@ BOOT_FAIL → ERROR
 
 ---
 
-## 14.5 `data/regions/region_<region_id>.json`
+## 14.5 `data/sampling_records.json`
 
 
 ### 对应代码
@@ -2697,9 +2740,9 @@ BOOT_FAIL → ERROR
 
 ### 规则
 
-* 每个 Region 一个文件
-* 降低损坏影响范围
-* 与“数据按 Region 独立存储”一致
+* 单文件持久化，内部按 `region_id` 分区
+* 与当前仓库实际结构一致
+* 与“数据按 Region 独立存储、地图级可聚合”一致
 
 这来自架构文档。 
 

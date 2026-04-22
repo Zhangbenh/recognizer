@@ -1,6 +1,6 @@
 ````markdown
 # 架构设计文档（V2.1，最终收口版）
-## 便携式离线植物识别器（含区域采样系统）
+## 便携式植物识别与区域采样系统（云端优先，本地回退）
 
 ---
 
@@ -21,10 +21,25 @@
 1. 明确启动默认进入 `HOME`，2 秒进入取景界面仅适用于普通模式确认后
 2. 明确采样模式下 `DISPLAY` 不允许用户取消记录
 3. 持久化“最后一次置信度”
-4. 冻结 `STATS` 入口，仅允许从 `REGION_SELECT` 进入
+4. 保留 `REGION_SELECT -> STATS` 区域统计入口，并新增 `MAP_SELECT -> MAP_STATS` 地图汇总统计入口
 5. 完善 `ERROR` 行为与恢复策略表
 6. 将长时稳定性要求转化为架构约束
 7. 补强准确率要求的架构支撑
+8. 将产品定义从“离线-only”回填为“云端优先，本地回退”
+
+---
+
+## 1.1 v1.1 补丁回填说明
+
+本文件原为离线架构收口版。自 v1.1 起，以下回填条目生效：
+
+- 识别链路改为“云端优先，本地模型回退”
+- 默认界面语言改为中文
+- 地图与区域选择页改为图片化选择页
+- 新增 `MAP_STATS` 作为地图级统计状态
+- 统计继续使用 `plant_key` 作为主键，但允许为云端新增植物生成稳定的命名空间键
+
+若本文件未修订旧段落与这些回填条目冲突，以本节及后续修订章节为准。
 
 ---
 
@@ -34,14 +49,15 @@
 
 系统需要在 Raspberry Pi 4B 2GB 上稳定运行，并满足以下目标：
 
-1. 支持离线植物识别
+1. 支持云端优先识别与本地模型回退
 2. 支持普通模式与采样模式
-3. 支持地图/区域选择与区域内连续识别
+3. 支持地图/区域图片化选择与区域内连续识别
 4. 支持本地 JSON 持久化与重启后恢复
-5. 支持统计查看
+5. 支持区域统计与地图级汇总统计
 6. 满足单线程、低复杂度、可维护的实现要求
 7. 支持对关键验收指标进行验证，包括响应时间、推理时延、稳定性、长时运行与错误处理
 8. 支持模型发布门禁与部署一致性校验，以支撑准确率目标
+9. 支持项目内静态图片资源与中文字体资源的受控部署
 
 ---
 
@@ -129,10 +145,11 @@ UI 只根据当前状态和状态上下文进行渲染。
 
 系统必须支持：
 
-- 普通模式：取景 → 拍照 → 推理 → 显示 → 返回
-- 采样模式：首页 → 地图 → 区域 → 识别 → 自动记录 → 循环
+- 普通模式：取景 → 拍照 → 云端优先识别 / 本地回退 → 显示 → 返回
+- 采样模式：首页 → 地图图片选择 → 区域图片选择 → 识别 → 自动记录 → 循环
 - 区域内自动记录
-- 本地统计查看
+- 区域统计查看
+- 地图级汇总统计查看
 - 本地 JSON 持久化
 
 ### 3.2 状态与流程约束
@@ -142,7 +159,7 @@ UI 只根据当前状态和状态上下文进行渲染。
 - 同时仅允许一个状态活跃
 - `Inferencing / Recording` 不允许中断
 - `Display > 5 秒` 自动返回
-- `Inferencing > 3 秒` 失败提示
+- `Inferencing > 4.5 秒` 失败提示
 - `Recording > 1 秒` 失败提示
 - UI 由状态驱动
 - 无并发写入
@@ -176,11 +193,13 @@ UI 只根据当前状态和状态上下文进行渲染。
 
 - 模式选择
 - 地图/区域选择
+- 地图级统计查询
 - 图像采集
-- 离线推理
+- 云端优先识别与本地回退编排
 - 标签映射
 - 结果展示
 - 区域统计记录
+- 地图统计聚合
 - 数据持久化
 - 统计展示
 - 错误提示与安全回退
@@ -189,7 +208,7 @@ UI 只根据当前状态和状态上下文进行渲染。
 
 本系统不负责：
 
-- 云端服务
+- 第三方云服务提供方本身（例如百度智能云）
 - 联网同步
 - 远程配置
 - 动态增删地图/区域
@@ -527,7 +546,8 @@ StorageAdapter 只做基础 IO 与一致性保障，不负责业务规则。
 
 #### 关键业务规则
 
-* 唯一键：`plant_name + region_id`
+* 唯一键：`plant_key + region_id`
+* 未映射云端植物允许使用稳定命名空间 `plant_key`
 * 同一植物重复识别不新增条目，`count +1`
 * 即使短时间重复识别也计数
 * 单次识别最多更新一次记录
@@ -622,9 +642,13 @@ StorageAdapter 只做基础 IO 与一致性保障，不负责业务规则。
 * 拒识阈值
 * 自动返回时间
 * 性能阈值
+- 云端请求超时阈值
+- 本地回退推理预算
 * 日志级别
 * 长按阈值
 * 模型发布门槛配置
+- 默认界面语言
+- 识别策略
 
 #### 7.1.2 labels.json
 
@@ -641,6 +665,23 @@ StorageAdapter 只做基础 IO 与一致性保障，不负责业务规则。
 
 * map 列表
 * region 列表
+* 地图缩略图与主图路径
+* 区域缩略图与主图路径
+
+#### 7.1.4 cloud_config.json
+
+保存：
+
+* 百度 API 凭据来源
+* token 缓存参数
+* 云端重试与超时参数
+
+#### 7.1.5 baidu_plant_mapping.json
+
+保存：
+
+* 百度中文名到本地 `plant_key` 的显式映射
+* 后续归并云端植物的补充映射
 
 #### 7.1.4 model_manifest.json
 
@@ -666,17 +707,16 @@ StorageAdapter 只做基础 IO 与一致性保障，不负责业务规则。
 
 ```text
 data/
-  regions/
-    region_<region_id>.json
+  sampling_records.json
 ```
 
-#### 每个 Region 一个文件
+#### 单文件按 Region 分区
 
 原因：
 
 * 与“数据按 Region 独立存储”一致
-* 简化加载和写入边界
-* 降低单文件损坏影响范围
+* 与当前仓库落盘结构一致
+* 支持在同一数据源上直接做地图级聚合
 
 ---
 
@@ -685,10 +725,13 @@ data/
 #### 7.3.1 RecognitionResult
 
 ```text
+plant_key
 plant_name
 display_name
 confidence
 is_recognized
+source
+catalog_mapped
 ```
 
 #### 7.3.2 RecordEvent
@@ -723,6 +766,7 @@ timestamp
   "plant_count": 3,
   "items": [
     {
+      "plant_key": "banana",
       "plant_name": "banana",
       "display_name": "Banana",
       "count": 5,
@@ -740,6 +784,7 @@ timestamp
 
 * 持久化的是**区域统计结果**
 * 不是完整识别流水日志
+* 主键是 `plant_key`，可来自本地标签目录，也可来自云端命名空间扩展键
 * `last_seen_at` 表示该植物最近一次被识别成功的时间
 * `last_confidence` 表示该植物最近一次被识别成功时的置信度
 * `updated_at` 表示该 Region 文件最近一次被更新的时间
@@ -779,6 +824,7 @@ timestamp
 * `BOOTING`
 * `HOME`
 * `MAP_SELECT`
+* `MAP_STATS`
 * `REGION_SELECT`
 * `PREVIEW`
 * `CAPTURED`
@@ -805,10 +851,11 @@ timestamp
 | BOOTING       | 初始化配置、标签、采样配置、输入、相机、模型、发布门禁校验 |
 | HOME          | 渲染模式选择，默认高亮普通模式               |
 | MAP_SELECT    | 加载 map 列表并高亮第一项               |
+| MAP_STATS     | 聚合并显示当前 Map 下所有 Region 的植物统计     |
 | REGION_SELECT | 加载所选 map 的 region 列表并高亮第一项    |
 | PREVIEW       | 启动或保持相机预览                     |
 | CAPTURED      | 固化当前识别帧到 StateContext         |
-| INFERENCING   | 调用推理服务并启动超时计时                 |
+| INFERENCING   | 调用云端优先、本地回退识别服务并启动超时计时      |
 | DISPLAY       | 显示识别结果并启动 5 秒自动返回计时           |
 | RECORDING     | 在采样模式下写入统计并启动 1 秒超时计时         |
 | STATS         | 加载并显示当前 Region 统计结果           |
@@ -857,9 +904,12 @@ timestamp
 | ------------- | --------------- | ----------- | ------------- |
 | HOME          | CONFIRM_PRESS   | 选中采样模式      | MAP_SELECT    |
 | MAP_SELECT    | NAV_PRESS       | 默认          | MAP_SELECT    |
+| MAP_SELECT    | NAV_LONG_PRESS  | 默认          | MAP_STATS     |
 | MAP_SELECT    | CONFIRM_PRESS   | 有 map       | REGION_SELECT |
 | MAP_SELECT    | CONFIRM_PRESS   | 无 map       | ERROR 或停留并提示  |
 | MAP_SELECT    | BACK_LONG_PRESS | 默认          | HOME          |
+| MAP_STATS     | NAV_PRESS       | 默认          | MAP_STATS     |
+| MAP_STATS     | BACK_LONG_PRESS | 默认          | MAP_SELECT    |
 | REGION_SELECT | NAV_PRESS       | 默认          | REGION_SELECT |
 | REGION_SELECT | CONFIRM_PRESS   | 默认          | PREVIEW       |
 | REGION_SELECT | BACK_LONG_PRESS | 默认          | MAP_SELECT    |
@@ -1196,8 +1246,9 @@ Fail Fast
 关键时延目标：
 
 * 拍照 ≤0.2s
-* 推理 ≤2.5s
-* 全流程 ≤3s
+* 云端成功链路 ≤3.0s
+* 本地回退预算 ≤1.5s
+* 云端失败、本地回退链路 ≤4.5s
 
 本架构将其拆解为：
 
@@ -1474,8 +1525,8 @@ logs/
 | 普通模式确认后 2 秒内进入取景 | 默认高亮普通模式 + 启动预算 + 进入 PREVIEW 时延约束                           |
 | 取景帧率 ≥15 FPS     | Preview 常驻预览链路 + 帧率观测                                       |
 | 按键响应 ≤200ms      | 输入归一化 + 抓帧预算拆分                                              |
-| 推理 ≤2.5s         | InferenceAdapter 预算 + 超时机制                                  |
-| 全流程 ≤3s          | 全链路预算拆分                                                     |
+| 云端成功链路 ≤3s    | RecognitionService 云端优先编排 + 云端请求超时机制                 |
+| 云端回退链路 ≤4.5s | RecognitionService 云端优先编排 + 本地回退预算 + 整体超时机制       |
 | 置信度 <60% 输出未识别   | RecognitionService 统一阈值规则                                   |
 | 低置信度不记录          | SamplingRecorder 仅接收 recognized 结果                          |
 | 识别成功后自动记录        | 采样模式 DISPLAY → RECORDING 强制转移                               |
@@ -1494,7 +1545,7 @@ logs/
 
 本系统的最终架构定义为：
 
-> 一个基于**单线程状态机驱动**的离线植物识别与区域采样系统；
+> 一个基于**单线程状态机驱动**、默认中文显示、支持云端优先识别与本地回退、支持地图汇总统计的植物识别与区域采样系统；
 > 其以**适配器隔离外部依赖**，以**状态驱动 UI**，以**领域规则约束识别、记录与统计**，以**本地 JSON 实现受控持久化**，并通过**显式错误回退、发布门禁与最小可观测性设计**支撑实现、部署与验收。
 
 ---
@@ -1506,7 +1557,7 @@ logs/
 1. 明确系统启动默认进入 `HOME`
 2. 明确“2 秒进入取景”仅适用于普通模式确认后
 3. 明确采样模式下 `DISPLAY` 不允许取消记录
-4. 冻结 `STATS` 入口，仅允许从 `REGION_SELECT` 进入
+4. 保留 `REGION_SELECT -> STATS` 区域统计入口，并新增 `MAP_SELECT -> MAP_STATS` 地图汇总统计入口
 5. 增加 `last_confidence` 持久化字段
 6. 显式区分 `RecordEvent` 与 `RegionStatsFile`
 7. 增加 `ERROR` 恢复策略表

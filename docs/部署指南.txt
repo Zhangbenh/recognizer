@@ -1,6 +1,8 @@
 Plant Recognizer 部署指南
 ============================
 
+v1.1 回填说明：系统产品定义已调整为“默认中文、云端优先识别、本地回退、支持地图汇总统计”的植物识别与区域采样系统。本指南以下配置与部署说明按该口径执行。
+
 1. 适用环境
 -----------
 - 开发/联调：Windows + keyboard + mock
@@ -39,8 +41,15 @@ python3 -m pip install ai-edge-litert numpy pillow
 - model manifest: config/model_manifest.json
 - sampling config: config/sampling_config.json
 - system config: config/system_config.json
+- cloud config: config/cloud_config.json
+- baidu mapping: config/baidu_plant_mapping.json
 - model file: models/plant_classifier_int8.tflite
 - data file: data/sampling_records.json
+- assets: assets/fonts, assets/maps, assets/regions
+
+补充说明：
+- `system_config.json` 在 v1.1 下新增 `ui_language`、`recognition_strategy`、`cloud_request_timeout_s`、`local_infer_timeout_s`
+- 云端敏感信息建议通过环境变量覆盖，不要求明文写入版本库
 
 
 4. 启动方式

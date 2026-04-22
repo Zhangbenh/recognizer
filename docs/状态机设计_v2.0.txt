@@ -4,6 +4,21 @@
 
 ---
 
+## v1.1 补丁回填说明
+
+自 v1.1 起，本状态机文档在保留单线程、单事件队列、状态机唯一控制流等硬约束的基础上，新增以下回填内容：
+
+- 识别策略改为“云端优先，本地回退”
+- `REGION_SELECT -> STATS` 继续保留为区域统计入口
+- 新增 `MAP_SELECT -> MAP_STATS` 作为地图汇总统计入口
+- `MAP_SELECT` 与 `REGION_SELECT` 页面语义升级为图片化选择页
+- `INFERENCING` 总体超时预算调整为 4.5 秒
+- 统计主键继续统一为 `plant_key` 字符串，并允许云端命名空间键
+
+若本文旧版段落与上述内容冲突，以本节及后续修订章节为准。
+
+---
+
 ## 0. 文档定位
 
 本文件是本项目**唯一有效的状态机实现依据**。
@@ -20,7 +35,8 @@
 - 单线程状态机驱动
 - UI 完全由状态驱动
 - 普通模式与采样模式双主流程
-- `STATS` 入口固定为 `REGION_SELECT -> STATS`
+- 区域统计入口为 `REGION_SELECT -> STATS`
+- 地图汇总统计入口为 `MAP_SELECT -> MAP_STATS`
 - `INFERENCING / RECORDING` 不可中断
 - 采样模式下 `DISPLAY` 不允许取消记录
 - 运行期错误优先降级回安全状态，启动期致命错误进入 `ERROR`
@@ -63,6 +79,7 @@
 BOOTING
 HOME
 MAP_SELECT
+MAP_STATS
 REGION_SELECT
 PREVIEW
 CAPTURED
@@ -131,6 +148,10 @@ HOME
 REGION_SELECT
 -> STATS
 -> REGION_SELECT
+
+MAP_SELECT
+-> MAP_STATS
+-> MAP_SELECT
 ```
 
 以上主流程必须与《架构设计_v2.1》保持一致。
@@ -444,6 +465,7 @@ selected_map_index
 selected_region_id
 selected_region_index
 selected_stats_page_index
+selected_map_stats_page_index
 last_captured_frame
 last_recognition_result
 last_error
@@ -452,6 +474,7 @@ display_deadline
 infer_deadline
 record_deadline
 current_stats_snapshot
+current_map_stats_snapshot
 ```
 
 ---
@@ -477,6 +500,10 @@ current_stats_snapshot
 ### selected_stats_page_index
 
 当前统计页页码，从 0 开始
+
+### selected_map_stats_page_index
+
+当前地图统计页页码，从 0 开始
 
 ### last_captured_frame
 
@@ -506,6 +533,10 @@ current_stats_snapshot
 
 当前区域统计数据视图，用于 `STATS` 页面渲染
 
+### current_map_stats_snapshot
+
+当前地图级统计数据视图，用于 `MAP_STATS` 页面渲染
+
 ---
 
 # 7. 定时器与超时系统
@@ -525,7 +556,7 @@ current_stats_snapshot
 
 | 状态            | 超时阈值 | TIMEOUT 解释        |
 | ------------- | ---: | ----------------- |
-| `INFERENCING` |  3 秒 | 转换为 `INFER_FAIL`  |
+| `INFERENCING` |  4.5 秒 | 转换为 `INFER_FAIL`  |
 | `DISPLAY`     |  5 秒 | 普通模式返回 / 采样模式分流   |
 | `RECORDING`   |  1 秒 | 转换为 `RECORD_FAIL` |
 
@@ -573,8 +604,9 @@ TIMEOUT
 | --------------- | --------------- |
 | `BOOTING`       | 启动画面            |
 | `HOME`          | 模式选择页           |
-| `MAP_SELECT`    | 地图选择页           |
-| `REGION_SELECT` | 区域选择页           |
+| `MAP_SELECT`    | 地图图片选择页        |
+| `MAP_STATS`     | 地图汇总统计页        |
+| `REGION_SELECT` | 区域图片选择页        |
 | `PREVIEW`       | 实时取景页           |
 | `CAPTURED`      | 不单独切页，沿用冻结画面    |
 | `INFERENCING`   | 推理中提示覆盖层        |
@@ -646,6 +678,37 @@ normal <-> sampling
 
 * 返回 `HOME`
 
+### NAV_LONG_PRESS
+
+* 进入 `MAP_STATS`
+
+---
+
+## 9.2A MAP_STATS 分页规则
+
+### 进入方式
+
+* 仅允许从 `MAP_SELECT` 进入
+* 每次进入时强制：
+
+   ```text
+   selected_map_stats_page_index = 0
+   ```
+
+### NAV_PRESS
+
+* 若 `current_map_stats_snapshot.total_pages > 1`：翻到下一页，末页回第一页
+* 若空态或仅 1 页：忽略
+
+### BACK_LONG_PRESS
+
+* 返回 `MAP_SELECT`
+
+### 排序规则
+
+* 先展示已映射到本地标签目录的植物，并按标签 `index` 排序
+* 再展示未映射到本地标签目录的云端扩展植物，并按 `display_name` 排序
+
 ---
 
 ## 9.3 REGION_SELECT 导航规则
@@ -689,17 +752,13 @@ normal <-> sampling
 
 统计项默认按以下规则排序：
 
-1. `plant_name` 升序
-   或者若已有明确显示名标准，则使用稳定一致的 `display_name` 升序
-
-> 为保证测试稳定性，必须固定一种排序。
-> 本规范推荐：**按 `display_name` 升序**。
-> 若实现中无 `display_name` 独立排序需求，则按 `plant_name` 升序，但必须全项目一致。
+1. 已映射到本地标签目录的植物，按标签 `index` 升序
+2. 未映射到本地标签目录的云端扩展植物，按 `display_name` 升序
 
 为消除歧义，本版最终固定为：
 
 ```text
-按 display_name 升序
+按“本地标签优先 + 云端扩展补后”的稳定规则排序
 ```
 
 ### 分页计算规则
@@ -1095,6 +1154,7 @@ error + enqueue SYSTEM_ERROR
 * `NAV_PRESS`
 * `CONFIRM_PRESS`
 * `BACK_LONG_PRESS`
+* `NAV_LONG_PRESS`
 
 ---
 
@@ -1106,6 +1166,8 @@ error + enqueue SYSTEM_ERROR
 | `NAV_PRESS`       | `has_available_maps == false` | 忽略                                    | `MAP_SELECT`    |
 | `CONFIRM_PRESS`   | `has_available_maps == true`  | 保留当前地图选择                              | `REGION_SELECT` |
 | `CONFIRM_PRESS`   | `has_available_maps == false` | 显示提示 “No available maps”              | `MAP_SELECT`    |
+| `NAV_LONG_PRESS`  | `has_available_maps == true`  | `selected_map_stats_page_index = 0`      | `MAP_STATS`     |
+| `NAV_LONG_PRESS`  | `has_available_maps == false` | 忽略                                    | `MAP_SELECT`    |
 | `BACK_LONG_PRESS` | -                             | 清理当前地图页临时提示                           | `HOME`          |
 
 ---
@@ -1114,7 +1176,6 @@ error + enqueue SYSTEM_ERROR
 
 ### 非法外部事件
 
-* `NAV_LONG_PRESS`
 * `RETRY_PRESS`
 
 ### 非法内部事件
@@ -1122,6 +1183,59 @@ error + enqueue SYSTEM_ERROR
 * 所有非当前状态需要的内部事件，包括 `TIMEOUT`
 
 处理原则同全局规则。
+
+---
+
+## 超时规则
+
+* 无
+
+---
+
+# 12.3A MAP_STATS
+
+## 定义
+
+当前地图的植物汇总统计查看状态。
+
+---
+
+## 进入动作
+
+1. 基于 `selected_map_id` 聚合该地图下所有 Region 的统计结果
+2. `selected_map_stats_page_index = 0`
+3. 若加载成功：
+
+   * 生成 `current_map_stats_snapshot`
+4. 若读取失败或数据损坏：
+
+   * 将 `current_map_stats_snapshot` 置为空态
+   * 记录 `DataError`
+   * 页面显示错误提示与空数据占位
+5. 渲染地图统计页第 0 页
+
+---
+
+## 退出动作
+
+* 清理地图统计页临时视图状态
+
+---
+
+## 可接收事件
+
+* `NAV_PRESS`
+* `BACK_LONG_PRESS`
+
+---
+
+## 允许迁移
+
+| 事件                | 守卫                                                       | 迁移动作                                                            | 下一状态      |
+| ----------------- | -------------------------------------------------------- | ----------------------------------------------------------------- | --------- |
+| `NAV_PRESS`       | `current_map_stats_snapshot` 非空 且 `total_pages > 1`      | `selected_map_stats_page_index = (index + 1) % total_pages`       | `MAP_STATS` |
+| `NAV_PRESS`       | 其他                                                       | 忽略                                                                | `MAP_STATS` |
+| `BACK_LONG_PRESS` | -                                                        | 返回地图选择页                                                          | `MAP_SELECT` |
 
 ---
 
@@ -1659,7 +1773,8 @@ warning + ignore
 4. 应用以下领域规则：
 
    * 仅 `is_recognized == true` 才记录
-   * 唯一键：`plant_name + region_id`
+   * 唯一键：`plant_key + region_id`
+   * 未映射云端植物允许使用稳定命名空间 `plant_key`
    * 已存在则 `count + 1`
    * 更新 `last_confidence`
    * 更新 `last_seen_at`

@@ -1,11 +1,18 @@
 Phase 5 采样模式验收指南
 ============================
 
+v1.1 回填说明
+------------
+本指南仍用于验证 Phase 5 的“区域采样主链路”是否完整，即 `MAP_SELECT -> REGION_SELECT -> ... -> STATS`。
+v1.1 新增的云端优先识别、地图级汇总统计 `MAP_STATS`、以及图片化选择页交互，不以本指南作为唯一验收依据，应结合 `docs/v1.1_补丁开发文档.txt` 与更新后的用户故事/设计文档一并验收。
+
 目标
 ----
 验证 3B 采样模式链路是否完整：
 HOME(采样) -> MAP_SELECT -> REGION_SELECT -> PREVIEW -> CAPTURED -> INFERENCING -> DISPLAY -> RECORDING -> PREVIEW
 以及 REGION_SELECT <-> STATS。
+
+说明：`INFERENCING` 在 v1.1 下允许内部执行“云端优先，本地回退”编排；本指南关注状态链路与记录结果，不区分识别来源。
 
 本指南对应脚本
 --------------

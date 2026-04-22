@@ -5,6 +5,21 @@
 
 ---
 
+# v1.1 补丁回填说明
+
+本文件原为 v1.0/v2 基线下的数据与配置冻结文档。自 v1.1 起，以下条目作为正式回填内容生效：
+
+- 识别策略改为“云端优先，本地回退”
+- 默认界面语言改为中文
+- `sampling_config.json` 需支持地图/区域图片资源路径
+- 新增 `cloud_config.json` 与 `baidu_plant_mapping.json`
+- 统计底层数据源统一为现有 `data/sampling_records.json`
+- 统计唯一键统一为 `plant_key + region_id`；未映射云端植物允许生成稳定命名空间 `plant_key`
+
+若本文件旧版段落与上述回填条目冲突，以本节及后续修订章节为准。
+
+---
+
 # 0. 文档定位
 
 本说明书用于**冻结并说明本项目所有数据结构与配置契约**，作为后续开发阶段（原型验证、编码实现、联调测试）的**唯一参考依据之一**。
@@ -44,6 +59,8 @@
 | `system_config.json` | 系统运行参数 |
 | `labels.json` | 模型标签映射 |
 | `sampling_config.json` | Map / Region 结构 |
+| `cloud_config.json` | 云端识别配置 |
+| `baidu_plant_mapping.json` | 百度中文名到本地 `plant_key` 的映射 |
 | `model_manifest.json` | 模型部署契约 |
 
 ---
@@ -52,7 +69,17 @@
 
 | 路径 | 作用 |
 |------|------|
-| `data/regions/region_<id>.json` | 每个 Region 的统计数据 |
+| `data/sampling_records.json` | 区域统计数据总文件，内部按 `region_id` 分区 |
+
+---
+
+## 2.3 静态资源（assets/）
+
+| 路径 | 作用 |
+|------|------|
+| `assets/fonts/` | 中文字体资源 |
+| `assets/maps/` | 地图主图与缩略图 |
+| `assets/regions/` | 区域主图与缩略图 |
 
 ---
 
@@ -61,6 +88,11 @@
 ## 3.1 作用
 
 定义模型输出索引与植物类别的映射关系。
+
+v1.1 约束补充：
+
+- `display_name` 默认改为中文显示名
+- 运行期统计与识别结果统一使用 `plant_key`；对本地标签目录，现有 `plant_name` 继续作为稳定内部键来源
 
 ---
 
@@ -73,7 +105,7 @@
     {
       "index": 0,
       "plant_name": "rose",
-      "display_name": "Rose"
+      "display_name": "玫瑰"
     }
   ]
 }
@@ -103,6 +135,7 @@
 * `display_name`：
 
   * 用于 UI
+  * 默认中文
   * 可读性优先
 
 ---
@@ -126,9 +159,11 @@
       "regions": [
         {
           "region_id": "north_garden",
-          "display_name": "North Garden"
+          "display_name": "北花园",
+          "thumbnail_path": "assets/regions/north_garden_thumb.png"
         }
-      ]
+      ],
+      "thumbnail_path": "assets/maps/campus_thumb.png"
     }
   ]
 }
@@ -148,10 +183,14 @@
 ## 4.4 用途
 
 * MAP_SELECT
+* MAP_STATS（按 map 聚合时使用 map 元数据）
 * REGION_SELECT
 * RECORDING
 * STATS
-* 文件命名（region_<id>.json）
+
+图片化页面要求：
+
+* `map` 与 `region` 对象都应可定位到对应缩略图或主图资源
 
 ---
 
@@ -167,13 +206,21 @@
 
 ```json
 {
+  "ui_language": "zh-CN",
+  "recognition_strategy": "cloud_first",
   "recognition_threshold": 0.6,
   "display_timeout_s": 5.0,
-  "infer_timeout_s": 3.0,
+  "cloud_request_timeout_s": 3.0,
+  "local_infer_timeout_s": 1.5,
+  "infer_timeout_s": 4.5,
   "record_timeout_s": 1.0,
   "long_press_threshold_ms": 800,
   "capture_debounce_ms": 300,
   "log_level": "INFO",
+  "performance_budget": {
+    "cloud_success_s": 3.0,
+    "cloud_fallback_s": 4.5
+  },
   "release_gate": {
     "min_top1_accuracy": 0.85
   }
@@ -195,6 +242,8 @@
 
 | 参数                | 状态          |
 | ----------------- | ----------- |
+| cloud_request_timeout_s | INFERENCING（云端请求阶段） |
+| local_infer_timeout_s   | INFERENCING（本地回退阶段） |
 | infer_timeout_s   | INFERENCING |
 | display_timeout_s | DISPLAY     |
 | record_timeout_s  | RECORDING   |
@@ -211,6 +260,30 @@
 ### 发布门禁
 
 * `min_top1_accuracy = 0.85`
+
+---
+
+## 5.5 cloud_config.json（云端配置）
+
+作用：
+
+* 承载百度 API Key / Secret Key 来源
+* 承载 token 缓存与重试参数
+* 承载云端请求超时与环境变量覆盖策略
+
+约束：
+
+* 允许环境变量覆盖敏感信息
+* 不要求把明文凭据硬编码提交进版本库
+
+---
+
+## 5.6 baidu_plant_mapping.json（百度名称映射）
+
+作用：
+
+* 显式维护“百度中文名 -> 本地 `plant_key`”映射
+* 未命中映射时，允许转入稳定云端命名空间 `plant_key` 生成流程
 
 ---
 
@@ -270,12 +343,12 @@
 
 ---
 
-# 7. Region JSON（统计数据）
+# 7. sampling_records.json（统计数据）
 
 ## 7.1 文件路径
 
 ```text
-data/regions/region_<region_id>.json
+data/sampling_records.json
 ```
 
 ---
@@ -284,18 +357,20 @@ data/regions/region_<region_id>.json
 
 ```json
 {
-  "region_id": "north_garden",
-  "plant_count": 2,
-  "items": [
-    {
-      "plant_name": "rose",
-      "display_name": "Rose",
-      "count": 5,
-      "last_confidence": 0.87,
-      "last_seen_at": "2026-04-18T10:00:00Z"
+  "regions": {
+    "north_garden": {
+      "records": {
+        "rose": {
+          "plant_key": "rose",
+          "plant_name": "rose",
+          "display_name": "玫瑰",
+          "count": 5,
+          "last_confidence": 0.87,
+          "last_seen_at": "2026-04-18T10:00:00Z"
+        }
+      }
     }
-  ],
-  "updated_at": "2026-04-18T10:00:00Z"
+  }
 }
 ```
 
@@ -303,8 +378,10 @@ data/regions/region_<region_id>.json
 
 ## 7.3 规则
 
-* 每个 Region 一个文件
-* 唯一键：`plant_name + region_id`
+* 单文件持久化，按 `regions.<region_id>` 分区
+* 区域内记录键为 `records.<plant_key>`
+* 统计唯一键语义为 `plant_key + region_id`
+* 若本地标签目录中不存在对应植物，允许生成稳定云端命名空间 `plant_key`
 * 行为：
 
 | 情况  | 处理                             |
@@ -328,16 +405,17 @@ data/regions/region_<region_id>.json
 ## 8.1 与状态机一致
 
 * DISPLAY → RECORDING 依赖 `is_recognized`
-* RECORDING 使用 Region JSON
+* RECORDING 使用 `sampling_records.json`
 * STATS 使用 snapshot
+* MAP_STATS 基于同一底层数据源做 map 级聚合
 
 ---
 
 ## 8.2 与 Domain 一致
 
 * RecognitionResult ← labels.json
-* SamplingRecorder ← Region JSON
-* StatisticsQuery ← Region JSON
+* SamplingRecorder ← `sampling_records.json`
+* StatisticsQuery ← `sampling_records.json`
 
 ---
 
@@ -387,7 +465,7 @@ data/regions/region_<region_id>.json
 # 11. 一句话总结
 
 > 本阶段完成后，系统的**数据契约已经完全冻结**：
-> 所有模块（状态机 / Domain / Adapter / UI）必须围绕这些结构展开，而不是反向修改它们。
+> 所有模块（状态机 / Domain / Adapter / UI）必须围绕这些结构展开，而不是反向修改它们；v1.1 的云端优先识别、图片化选择页和地图汇总统计也必须在此契约内实现。
 
 ---
 
