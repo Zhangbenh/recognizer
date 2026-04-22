@@ -10,8 +10,8 @@ class InferencingOverlay:
 
 	@staticmethod
 	def render(view_model: dict[str, Any]) -> list[str]:
-		lines = ["[Inferencing]"]
-		lines.append(f"  mode: {view_model.get('mode')}")
-		lines.append(f"  status: {view_model.get('status')}")
-		lines.append(f"  hint: {view_model.get('hint')}")
+		lines = ["[识别中]"]
+		lines.append(f"  模式: {view_model.get('mode_display_name')}")
+		lines.append(f"  状态: {view_model.get('status')}")
+		lines.append(f"  提示: {view_model.get('hint')}")
 		return lines

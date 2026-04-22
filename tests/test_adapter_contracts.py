@@ -7,7 +7,9 @@ import pytest
 from application.events import EventType
 from application.input_mapper import InputMapper
 from application.states import State
-from domain.errors import ConfigError, LabelError, ModelError
+from domain import MapStatsItem, MapStatsSnapshot
+from domain.errors import CloudTimeoutError, ConfigError, LabelError, ModelError
+from domain.models import RecognitionResult
 from domain.release_gate_service import ReleaseGateService
 from infrastructure.config.label_repository import LabelRepository
 from infrastructure.config.model_manifest_repository import ModelManifestRepository
@@ -95,22 +97,37 @@ def test_config_repositories_contracts_and_release_gate() -> None:
 
 	assert system_repo.long_press_threshold_ms() == 800
 	assert system_repo.capture_debounce_ms() == 300
-	assert system_repo.infer_timeout_s() == 3.0
+	assert system_repo.ui_language() == "zh-CN"
+	assert system_repo.recognition_strategy() == "cloud_first"
+	assert system_repo.cloud_request_timeout_s() == 3.0
+	assert system_repo.local_infer_timeout_s() == 1.5
+	assert system_repo.get("ui_language") == "zh-CN"
+	assert system_repo.get("recognition_strategy") == "cloud_first"
+	assert system_repo.get("cloud_request_timeout_s") == 3.0
+	assert system_repo.get("local_infer_timeout_s") == 1.5
+	assert system_repo.infer_timeout_s() == 4.5
 	assert system_repo.display_timeout_s() == 5.0
 	assert system_repo.record_timeout_s() == 1.0
+	budget = system_repo.performance_budget()
+	assert budget["cloud_success_s"] == 3.0
+	assert budget["cloud_fallback_s"] == 4.5
 
 	labels = label_repo.index_map()
 	assert len(labels) == 30
-	assert labels[0]["display_name"] == "Aloe Vera"
+	assert labels[0]["display_name"] == "芦荟"
 
 	assert manifest_repo.output_classes() == 30
 	assert manifest_repo.get_model_file().endswith(".tflite")
 
 	maps = sampling_repo.list_maps()
 	assert len(maps) >= 1
+	assert maps[0]["display_name"] == "地图A"
+	assert maps[0]["thumbnail_path"].endswith("map_a_thumb.png")
 	first_map_id = str(maps[0]["map_id"])
 	regions = sampling_repo.list_regions(first_map_id)
 	assert len(regions) >= 1
+	assert regions[0]["display_name"] == "区域1"
+	assert regions[0]["thumbnail_path"].endswith("map_a_r1_thumb.png")
 
 	release_gate = ReleaseGateService(
 		model_manifest_repository=manifest_repo,
@@ -142,3 +159,78 @@ def test_sampling_config_invalid_maps_raises_config_error(tmp_path) -> None:
 
 	with pytest.raises(ConfigError):
 		repo.list_maps()
+
+
+def test_v11_domain_models_support_cloud_metadata_and_map_stats() -> None:
+	result = RecognitionResult(
+		class_id=18,
+		plant_key="cloud:野花",
+		plant_name="野花",
+		display_name="野花",
+		confidence=0.93,
+		is_recognized=True,
+		source="cloud",
+		fallback_used=True,
+		raw_label_name="野花",
+		catalog_mapped=False,
+		top3=[(18, 0.93)],
+	)
+
+	assert result.source == "cloud"
+	assert result.fallback_used is True
+	assert result.raw_label_name == "野花"
+	assert result.catalog_mapped is False
+
+	unrecognized = RecognitionResult.unrecognized()
+	assert unrecognized.source == "local"
+	assert unrecognized.fallback_used is False
+	assert unrecognized.raw_label_name is None
+	assert unrecognized.catalog_mapped is False
+
+	snapshot = MapStatsSnapshot(
+		map_id="map_a",
+		map_display_name="地图A",
+		total_region_count=4,
+		recorded_region_count=2,
+		items=[
+			MapStatsItem(
+				plant_key="paddy",
+				display_name="水稻",
+				total_count=3,
+				covered_region_count=2,
+				last_confidence=0.91,
+				catalog_mapped=True,
+			),
+			MapStatsItem(
+				plant_key="cloud:野花",
+				display_name="野花",
+				total_count=2,
+				covered_region_count=1,
+				last_confidence=0.86,
+				catalog_mapped=False,
+			),
+			MapStatsItem(
+				plant_key="banana",
+				display_name="香蕉",
+				total_count=1,
+				covered_region_count=1,
+				last_confidence=0.77,
+				catalog_mapped=True,
+			),
+		],
+		page_size=2,
+	)
+
+	assert snapshot.plant_species_count == 3
+	assert snapshot.total_pages == 2
+	assert [item.plant_key for item in snapshot.page(0)] == ["paddy", "cloud:野花"]
+	assert [item.plant_key for item in snapshot.page(1)] == ["banana"]
+
+
+def test_cloud_error_types_preserve_retryable_metadata() -> None:
+	error = CloudTimeoutError("cloud request timed out", retryable=True)
+	error_info = error.to_error_info()
+
+	assert error_info.error_type == "CloudTimeoutError"
+	assert error_info.message == "cloud request timed out"
+	assert error_info.retryable is True

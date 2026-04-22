@@ -1,0 +1,24 @@
+{
+  "version": "1.1.0",
+  "mappings": {
+    "芦荟": "aloevera",
+    "香蕉": "banana",
+    "木薯": "cassava",
+    "玉米": "corn",
+    "黄瓜": "cucumber",
+    "茄子": "eggplant",
+    "生姜": "ginger",
+    "番石榴": "guava",
+    "芒果": "mango",
+    "橙子": "orange",
+    "水稻": "paddy",
+    "木瓜": "papaya",
+    "辣椒": "peperchili",
+    "菠萝": "pineapple",
+    "柚子": "pomelo",
+    "菠菜": "spinach",
+    "烟草": "tobacco",
+    "莲雾": "waterapple",
+    "西瓜": "watermelon"
+  }
+}

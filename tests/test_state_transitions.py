@@ -10,6 +10,8 @@ from application.state_handlers.captured_handler import CapturedHandler
 from application.state_handlers.error_handler import ErrorHandler
 from application.state_handlers.home_handler import HomeHandler
 from application.state_handlers.inferencing_handler import InferencingHandler
+from application.state_handlers.map_select_handler import MapSelectHandler
+from application.state_handlers.map_stats_handler import MapStatsHandler
 from application.state_handlers.recording_handler import RecordingHandler
 from application.state_machine import StateMachine
 from application.states import State
@@ -17,6 +19,10 @@ from application.transition_engine import TransitionEngine, ValidationResult
 from domain.errors import ReleaseGateError
 from domain.models import ErrorInfo
 from domain.models import RecognitionResult
+from domain.sampling_recorder import SamplingRecorder
+from domain.statistics_query_service import StatisticsQueryService
+from infrastructure.storage.json_storage_adapter import JsonStorageAdapter
+from infrastructure.storage.region_stats_repository import RegionStatsRepository
 
 
 def _apply(engine: TransitionEngine, state: State, event: Event, ctx: StateContext) -> State:
@@ -103,6 +109,109 @@ def test_transition_engine_sampling_entry_and_map_switch_resets_region() -> None
 	assert ctx.selected_map_id == "map_b"
 	assert ctx.selected_region_id is None
 	assert ctx.selected_region_index is None
+	assert ctx.selected_map_stats_page_index == 0
+	assert ctx.current_map_stats_snapshot is None
+
+
+def test_state_machine_map_stats_round_trip_and_uses_map_aggregation(tmp_path) -> None:
+	class _SamplingRepoStub:
+		def __init__(self) -> None:
+			self._maps = [
+				{
+					"map_id": "map_a",
+					"display_name": "地图A",
+					"regions": [
+						{"region_id": "map_a_r1", "display_name": "区域1"},
+						{"region_id": "map_a_r2", "display_name": "区域2"},
+					],
+				}
+			]
+
+		def list_maps(self):
+			return self._maps
+
+		def get_map(self, map_id: str):
+			for item in self._maps:
+				if item["map_id"] == map_id:
+					return item
+			return None
+
+	class _LabelRepoStub:
+		def load(self):
+			return [
+				{"index": 1, "plant_key": "banana", "display_name": "香蕉"},
+				{"index": 18, "plant_key": "paddy", "display_name": "水稻"},
+			]
+
+	storage = JsonStorageAdapter(str(tmp_path / "stats.json"), default_value={"regions": {}}, pretty=True)
+	repository = RegionStatsRepository(storage_adapter=storage)
+	recorder = SamplingRecorder(stats_repository=repository)
+	stats_service = StatisticsQueryService(
+		stats_repository=repository,
+		label_repository=_LabelRepoStub(),
+		sampling_config_repository=_SamplingRepoStub(),
+		page_size=1,
+	)
+
+	recorder.record(
+		"map_a_r1",
+		RecognitionResult(
+			class_id=1,
+			plant_key="banana",
+			plant_name="banana",
+			display_name="香蕉",
+			confidence=0.61,
+			is_recognized=True,
+			top3=[(1, 0.61)],
+		),
+	)
+	recorder.record(
+		"map_a_r2",
+		RecognitionResult(
+			class_id=None,
+			plant_key="cloud:wildflower",
+			plant_name="wildflower",
+			display_name="野花",
+			confidence=0.88,
+			is_recognized=True,
+			source="cloud",
+			catalog_mapped=False,
+			top3=[],
+		),
+	)
+
+	state_machine = StateMachine(
+		initial_state=State.MAP_SELECT,
+		context=StateContext(mode="sampling"),
+		handlers={
+			State.MAP_SELECT: MapSelectHandler(sampling_config_repository=_SamplingRepoStub()),
+			State.MAP_STATS: MapStatsHandler(statistics_query_service=stats_service),
+		},
+	)
+	state_machine.start()
+
+	assert state_machine.context.selected_map_id == "map_a"
+
+	state_machine.enqueue(Event(EventType.NAV_LONG_PRESS, source="test"))
+	assert state_machine.process_next_event() is True
+	assert state_machine.current_state == State.MAP_STATS
+	assert state_machine.context.current_map_stats_snapshot is not None
+	assert state_machine.context.current_map_stats_snapshot.map_id == "map_a"
+	assert state_machine.context.current_map_stats_snapshot.total_region_count == 2
+	assert [item.plant_key for item in state_machine.context.current_map_stats_snapshot.items] == [
+		"banana",
+		"cloud:wildflower",
+	]
+	assert state_machine.context.selected_map_stats_page_index == 0
+
+	state_machine.enqueue(Event(EventType.NAV_PRESS, source="test"))
+	assert state_machine.process_next_event() is True
+	assert state_machine.current_state == State.MAP_STATS
+	assert state_machine.context.selected_map_stats_page_index == 1
+
+	state_machine.enqueue(Event(EventType.BACK_LONG_PRESS, source="test"))
+	assert state_machine.process_next_event() is True
+	assert state_machine.current_state == State.MAP_SELECT
 
 
 def test_transition_engine_error_retry_success_goes_home() -> None:

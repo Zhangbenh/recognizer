@@ -29,6 +29,18 @@ class SystemConfigRepository:
 	def get(self, key: str, default: Any = None) -> Any:
 		return self.load().get(key, default)
 
+	def ui_language(self) -> str:
+		return str(self.get("ui_language", "zh-CN"))
+
+	def recognition_strategy(self) -> str:
+		return str(self.get("recognition_strategy", "local_only"))
+
+	def cloud_request_timeout_s(self) -> float:
+		return float(self.get("cloud_request_timeout_s", self.infer_timeout_s()))
+
+	def local_infer_timeout_s(self) -> float:
+		return float(self.get("local_infer_timeout_s", self.infer_timeout_s()))
+
 	def recognition_threshold(self) -> float:
 		return float(self.get("recognition_threshold", 0.6))
 

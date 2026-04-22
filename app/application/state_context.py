@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from domain.constants import HOME_OPTION_NORMAL, HOME_OPTION_SAMPLING, MODE_NORMAL
 from domain.errors import RecognizerError
-from domain.models import ErrorInfo, RecognitionResult, StatsSnapshot
+from domain.models import ErrorInfo, MapStatsSnapshot, RecognitionResult, StatsSnapshot
 
 
 @dataclass(slots=True)
@@ -18,6 +18,7 @@ class StateContext:
 	selected_home_option: str = HOME_OPTION_NORMAL
 	selected_map_id: Optional[str] = None
 	selected_map_index: Optional[int] = None
+	selected_map_stats_page_index: int = 0
 	selected_region_id: Optional[str] = None
 	selected_region_index: Optional[int] = None
 	selected_stats_page_index: int = 0
@@ -29,6 +30,7 @@ class StateContext:
 	display_deadline: Optional[float] = None
 	infer_deadline: Optional[float] = None
 	record_deadline: Optional[float] = None
+	current_map_stats_snapshot: Optional[MapStatsSnapshot] = None
 	current_stats_snapshot: Optional[StatsSnapshot] = None
 
 	# Operational fields used by guards and navigation actions.

@@ -15,6 +15,7 @@ from presentation.pages import (
 	HomePage,
 	InferencingOverlay,
 	MapPage,
+	MapStatsPage,
 	PreviewPage,
 	RegionPage,
 	StatsPage,
@@ -67,12 +68,14 @@ class Renderer:
 			return HomePage.render(view_model)
 		if state == State.MAP_SELECT:
 			return MapPage.render(view_model)
+		if state == State.MAP_STATS:
+			return MapStatsPage.render(view_model)
 		if state == State.REGION_SELECT:
 			return RegionPage.render(view_model)
 		if state == State.PREVIEW:
 			return PreviewPage.render(view_model)
 		if state == State.CAPTURED:
-			return ["[Captured]", "  status: frame frozen"]
+			return ["[已拍摄]", f"  状态: {view_model.get('status')}", f"  提示: {view_model.get('hint')}"]
 		if state == State.INFERENCING:
 			return InferencingOverlay.render(view_model)
 		if state == State.STATS:

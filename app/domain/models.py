@@ -34,6 +34,10 @@ class RecognitionResult:
 	display_name: Optional[str]
 	confidence: float
 	is_recognized: bool
+	source: str = "local"
+	fallback_used: bool = False
+	raw_label_name: Optional[str] = None
+	catalog_mapped: bool = False
 	top3: list[tuple[int, float]] = field(default_factory=list)
 	recognized_at: str = field(default_factory=utc_now_iso)
 
@@ -46,6 +50,10 @@ class RecognitionResult:
 			display_name=None,
 			confidence=confidence,
 			is_recognized=False,
+			source="local",
+			fallback_used=False,
+			raw_label_name=None,
+			catalog_mapped=False,
 			top3=[],
 		)
 
@@ -77,6 +85,47 @@ class StatsSnapshot:
 		return (len(self.items) + self.page_size - 1) // self.page_size
 
 	def page(self, index: int) -> list[StatsItem]:
+		if index < 0:
+			index = 0
+		start = index * self.page_size
+		end = start + self.page_size
+		return self.items[start:end]
+
+
+@dataclass(slots=True)
+class MapStatsItem:
+	"""Aggregated statistics item for one plant across a whole map."""
+
+	plant_key: str
+	display_name: str
+	total_count: int
+	covered_region_count: int
+	last_confidence: float
+	catalog_mapped: bool
+
+
+@dataclass(slots=True)
+class MapStatsSnapshot:
+	"""Read-only aggregated snapshot prepared for MAP_STATS rendering."""
+
+	map_id: str
+	map_display_name: str
+	total_region_count: int = 0
+	recorded_region_count: int = 0
+	items: list[MapStatsItem] = field(default_factory=list)
+	page_size: int = 4
+
+	@property
+	def plant_species_count(self) -> int:
+		return len(self.items)
+
+	@property
+	def total_pages(self) -> int:
+		if not self.items:
+			return 1
+		return (len(self.items) + self.page_size - 1) // self.page_size
+
+	def page(self, index: int) -> list[MapStatsItem]:
 		if index < 0:
 			index = 0
 		start = index * self.page_size

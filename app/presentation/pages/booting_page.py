@@ -10,8 +10,8 @@ class BootingPage:
 
 	@staticmethod
 	def render(view_model: dict[str, Any]) -> list[str]:
-		lines = ["[Booting]"]
-		lines.append(f"  title: {view_model.get('title')}")
-		lines.append(f"  status: {view_model.get('status')}")
-		lines.append("  hint: initializing camera and model...")
+		lines = ["[启动中]"]
+		lines.append(f"  标题: {view_model.get('title')}")
+		lines.append(f"  状态: {view_model.get('status')}")
+		lines.append(f"  提示: {view_model.get('hint')}")
 		return lines

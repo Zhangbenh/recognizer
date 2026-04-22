@@ -9,6 +9,18 @@ from application.states import State
 from domain.errors import CameraError, DataError, InferenceError, StorageError
 
 
+def _mode_display_name(mode: str | None) -> str:
+	if mode == "sampling":
+		return "采样模式"
+	return "普通模式"
+
+
+def _home_option_display_name(option: str | None) -> str:
+	if option == "sampling":
+		return "采样统计"
+	return "普通识别"
+
+
 def _selected_display_name(items: list[dict[str, Any]], selected_id: str | None, id_key: str) -> str | None:
 	for item in items:
 		if str(item.get(id_key) or "") == str(selected_id or ""):
@@ -42,20 +54,23 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 	base: dict[str, Any] = {
 		"state": state.value,
 		"mode": ctx.mode,
+		"mode_display_name": _mode_display_name(ctx.mode),
 	}
 
 	if state == State.BOOTING:
 		base.update(
 			{
-				"title": "Plant Recognizer",
-				"status": "booting",
+				"title": "植物识别系统",
+				"status": "启动中",
+				"hint": "正在初始化相机与模型...",
 			}
 		)
 	elif state == State.HOME:
 		base.update(
 			{
 				"selected_home_option": ctx.selected_home_option,
-				"hint": "NAV: switch option | CONFIRM: enter",
+				"selected_home_option_display_name": _home_option_display_name(ctx.selected_home_option),
+				"hint": "NAV：切换模式 | CONFIRM：进入",
 			}
 		)
 	elif state == State.MAP_SELECT:
@@ -67,8 +82,59 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 				"map_count": len(ctx.available_maps),
 				"selected_map_display_name": selected_name,
 				"available_map_names": _available_display_names(ctx.available_maps),
+				"hint": "NAV：切换地图 | CONFIRM：进入区域 | NAV_LONG：地图统计 | BACK_LONG：返回首页",
 			}
 		)
+	elif state == State.MAP_STATS:
+		snapshot = ctx.current_map_stats_snapshot
+		selected_map_name = _selected_display_name(ctx.available_maps, ctx.selected_map_id, "map_id")
+		if snapshot is None:
+			base.update(
+				{
+					"map_id": ctx.selected_map_id,
+					"map_display_name": selected_map_name,
+					"total_region_count": 0,
+					"recorded_region_count": 0,
+					"plant_species_count": 0,
+					"page": 0,
+					"total_pages": 1,
+					"items": [],
+					"hint": "NAV：下一页 | BACK_LONG：返回地图",
+				}
+			)
+			error = ctx.last_error
+			if error and _is_non_fatal_error(error.error_type):
+				base.update(
+					{
+						"map_stats_error_type": error.error_type,
+						"map_stats_error_message": error.message,
+					}
+				)
+		else:
+			page_index = max(0, ctx.selected_map_stats_page_index)
+			page_items = [
+				{
+					"display_name": item.display_name,
+					"total_count": item.total_count,
+					"covered_region_count": item.covered_region_count,
+					"last_confidence": item.last_confidence,
+					"catalog_mapped": item.catalog_mapped,
+				}
+				for item in snapshot.page(page_index)
+			]
+			base.update(
+				{
+					"map_id": snapshot.map_id,
+					"map_display_name": snapshot.map_display_name,
+					"total_region_count": snapshot.total_region_count,
+					"recorded_region_count": snapshot.recorded_region_count,
+					"plant_species_count": snapshot.plant_species_count,
+					"page": page_index,
+					"total_pages": snapshot.total_pages,
+					"items": page_items,
+					"hint": "NAV：下一页 | BACK_LONG：返回地图",
+				}
+			)
 	elif state == State.REGION_SELECT:
 		selected_map_name = _selected_display_name(ctx.available_maps, ctx.selected_map_id, "map_id")
 		selected_region_name = _selected_display_name(ctx.available_regions, ctx.selected_region_id, "region_id")
@@ -81,6 +147,7 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 				"region_count": len(ctx.available_regions),
 				"selected_region_display_name": selected_region_name,
 				"available_region_names": _available_display_names(ctx.available_regions),
+				"hint": "NAV：切换区域 | CONFIRM：进入预览 | NAV_LONG：区域统计 | BACK_LONG：返回地图",
 			}
 		)
 	elif state == State.PREVIEW:
@@ -93,11 +160,11 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 					"selected_map_display_name": selected_map_name,
 					"selected_region_id": ctx.selected_region_id,
 					"selected_region_display_name": selected_region_name,
-					"hint": "CONFIRM: capture | BACK_LONG: return",
+					"hint": "CONFIRM：拍摄 | BACK_LONG：返回",
 				}
 			)
 		else:
-			base.update({"hint": "CONFIRM: capture | BACK_LONG: return"})
+			base.update({"hint": "CONFIRM：拍摄 | BACK_LONG：返回"})
 
 		error = ctx.last_error
 		if error and _is_non_fatal_error(error.error_type) and ctx.preview_error_flash_pending:
@@ -111,7 +178,7 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 		result = ctx.last_recognition_result
 		base.update(
 			{
-				"hint": "BACK_LONG: return" if ctx.mode == "normal" else "waiting auto-route...",
+				"hint": "BACK_LONG：返回" if ctx.mode == "normal" else "等待自动流转...",
 				"display_name": result.display_name if result else None,
 				"plant_name": result.plant_name if result else None,
 				"confidence": result.confidence if result else None,
@@ -121,21 +188,31 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 	elif state == State.CAPTURED:
 		base.update(
 			{
-				"status": "captured",
-				"hint": "frame frozen",
+				"status": "已拍摄",
+				"hint": "当前画面已冻结",
 			}
 		)
 	elif state == State.INFERENCING:
 		base.update(
 			{
-				"status": "inferencing",
-				"hint": "AI inferencing...",
+				"status": "识别中",
+				"hint": "AI 正在识别...",
 			}
 		)
 	elif state == State.STATS:
 		snapshot = ctx.current_stats_snapshot
+		selected_region_name = _selected_display_name(ctx.available_regions, ctx.selected_region_id, "region_id")
 		if snapshot is None:
-			base.update({"region_id": ctx.selected_region_id, "items": [], "page": 0, "total_pages": 1})
+			base.update(
+				{
+					"region_id": ctx.selected_region_id,
+					"region_display_name": selected_region_name,
+					"items": [],
+					"page": 0,
+					"total_pages": 1,
+					"hint": "NAV：下一页 | BACK_LONG：返回区域",
+				}
+			)
 			error = ctx.last_error
 			if error and _is_non_fatal_error(error.error_type):
 				base.update(
@@ -157,16 +234,18 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 			base.update(
 				{
 					"region_id": snapshot.region_id,
+					"region_display_name": selected_region_name,
 					"page": page_index,
 					"total_pages": snapshot.total_pages,
 					"items": page_items,
+					"hint": "NAV：下一页 | BACK_LONG：返回区域",
 				}
 			)
 	elif state == State.RECORDING:
 		result = ctx.last_recognition_result
 		base.update(
 			{
-				"status": "recording",
+				"status": "记录中",
 				"selected_region_id": ctx.selected_region_id,
 				"display_name": result.display_name if result else None,
 				"plant_name": result.plant_name if result else None,
@@ -181,7 +260,7 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 				"error_type": error.error_type if error else None,
 				"error_message": error.message if error else None,
 				"retryable": bool(error and error.retryable),
-				"hint": "CONFIRM: retry",
+				"hint": "CONFIRM：重试",
 			}
 		)
 

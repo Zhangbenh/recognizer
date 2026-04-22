@@ -139,7 +139,30 @@ class TransitionEngine:
 			TransitionRule(next_state=State.REGION_SELECT, guard=self.guards.has_available_maps),
 		)
 		add(State.MAP_SELECT, EventType.CONFIRM_PRESS, TransitionRule(next_state=State.MAP_SELECT))
+		add(
+			State.MAP_SELECT,
+			EventType.NAV_LONG_PRESS,
+			TransitionRule(
+				next_state=State.MAP_STATS,
+				guard=self.guards.has_available_maps,
+				action=self._action_map_stats_page_reset,
+			),
+		)
+		add(State.MAP_SELECT, EventType.NAV_LONG_PRESS, TransitionRule(next_state=State.MAP_SELECT))
 		add(State.MAP_SELECT, EventType.BACK_LONG_PRESS, TransitionRule(next_state=State.HOME))
+
+		# MAP_STATS
+		add(
+			State.MAP_STATS,
+			EventType.NAV_PRESS,
+			TransitionRule(
+				next_state=State.MAP_STATS,
+				guard=self._has_multiple_map_stats_pages,
+				action=self._action_map_stats_page_next,
+			),
+		)
+		add(State.MAP_STATS, EventType.NAV_PRESS, TransitionRule(next_state=State.MAP_STATS))
+		add(State.MAP_STATS, EventType.BACK_LONG_PRESS, TransitionRule(next_state=State.MAP_SELECT))
 
 		# REGION_SELECT
 		add(State.REGION_SELECT, EventType.NAV_PRESS, TransitionRule(next_state=State.REGION_SELECT, action=self._action_region_next))
@@ -285,6 +308,8 @@ class TransitionEngine:
 		# Region selection belongs to a specific map and must be refreshed after map switch.
 		ctx.selected_region_index = None
 		ctx.selected_region_id = None
+		ctx.selected_map_stats_page_index = 0
+		ctx.current_map_stats_snapshot = None
 
 	@staticmethod
 	def _action_region_next(ctx: StateContext, _event: Event) -> None:
@@ -308,6 +333,19 @@ class TransitionEngine:
 		if snapshot.total_pages <= 1:
 			return
 		ctx.selected_stats_page_index = (ctx.selected_stats_page_index + 1) % snapshot.total_pages
+
+	@staticmethod
+	def _action_map_stats_page_reset(ctx: StateContext, _event: Event) -> None:
+		ctx.selected_map_stats_page_index = 0
+
+	@staticmethod
+	def _action_map_stats_page_next(ctx: StateContext, _event: Event) -> None:
+		snapshot = ctx.current_map_stats_snapshot
+		if snapshot is None:
+			return
+		if snapshot.total_pages <= 1:
+			return
+		ctx.selected_map_stats_page_index = (ctx.selected_map_stats_page_index + 1) % snapshot.total_pages
 
 	@staticmethod
 	def _action_store_frame_if_present(ctx: StateContext, event: Event) -> None:
@@ -348,6 +386,10 @@ class TransitionEngine:
 				display_name=result.get("display_name"),
 				confidence=float(result.get("confidence", 0.0)),
 				is_recognized=bool(result.get("is_recognized", False)),
+				source=str(result.get("source") or "local"),
+				fallback_used=bool(result.get("fallback_used", False)),
+				raw_label_name=result.get("raw_label_name"),
+				catalog_mapped=bool(result.get("catalog_mapped", False)),
 				top3=result.get("top3", []),
 			)
 
@@ -376,6 +418,10 @@ class TransitionEngine:
 	@staticmethod
 	def _has_multiple_stats_pages(ctx: StateContext) -> bool:
 		return bool(ctx.current_stats_snapshot and ctx.current_stats_snapshot.total_pages > 1)
+
+	@staticmethod
+	def _has_multiple_map_stats_pages(ctx: StateContext) -> bool:
+		return bool(ctx.current_map_stats_snapshot and ctx.current_map_stats_snapshot.total_pages > 1)
 
 	@staticmethod
 	def _follow_up_infer_fail(_ctx: StateContext, _event: Event) -> list[Event]:

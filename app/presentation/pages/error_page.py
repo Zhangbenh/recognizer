@@ -10,17 +10,17 @@ class ErrorPage:
 
 	@staticmethod
 	def render(view_model: dict[str, Any]) -> list[str]:
-		lines = ["[Error]"]
-		lines.append(f"  error_type: {view_model.get('error_type')}")
-		lines.append(f"  message: {view_model.get('error_message')}")
+		lines = ["[错误]"]
+		lines.append(f"  错误类型: {view_model.get('error_type')}")
+		lines.append(f"  错误信息: {view_model.get('error_message')}")
 
 		retryable = bool(view_model.get("retryable"))
-		lines.append(f"  retryable: {retryable}")
+		lines.append(f"  可重试: {'是' if retryable else '否'}")
 
 		if retryable:
-			lines.append("  actions: CONFIRM retry")
+			lines.append("  操作: CONFIRM 重试")
 		else:
-			lines.append("  actions: CONFIRM ignored (non-retryable)")
+			lines.append("  操作: CONFIRM 忽略（不可重试）")
 
 		return lines
 

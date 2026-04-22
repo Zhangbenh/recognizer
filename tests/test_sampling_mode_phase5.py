@@ -14,6 +14,7 @@ from presentation.pages.error_page import ErrorPage
 from presentation.pages.home_page import HomePage
 from presentation.pages.inferencing_overlay import InferencingOverlay
 from presentation.pages.map_page import MapPage
+from presentation.pages.map_stats_page import MapStatsPage
 from presentation.pages.preview_page import PreviewPage
 from presentation.pages.region_page import RegionPage
 from presentation.pages.stats_page import StatsPage
@@ -60,7 +61,58 @@ def test_sampling_services_work_with_repository(tmp_path) -> None:
 	assert snapshot.items[0].count == 2
 
 
-def test_statistics_sorts_by_display_name_standard(tmp_path) -> None:
+def test_statistics_sort_local_catalog_before_cloud_and_by_label_index(tmp_path) -> None:
+	storage = JsonStorageAdapter(str(tmp_path / "stats.json"), default_value={"regions": {}}, pretty=True)
+	repository = RegionStatsRepository(storage_adapter=storage)
+	recorder = SamplingRecorder(stats_repository=repository)
+	stats_service = StatisticsQueryService(stats_repository=repository)
+
+	recorder.record(
+		"map_a_r1",
+		RecognitionResult(
+			class_id=18,
+			plant_key="paddy",
+			plant_name="paddy",
+			display_name="水稻",
+			confidence=0.91,
+			is_recognized=True,
+			top3=[(18, 0.91)],
+		),
+	)
+
+	recorder.record(
+		"map_a_r1",
+		RecognitionResult(
+			class_id=1,
+			plant_key="banana",
+			plant_name="banana",
+			display_name="香蕉",
+			confidence=0.95,
+			is_recognized=True,
+			top3=[(1, 0.95)],
+		),
+	)
+
+	recorder.record(
+		"map_a_r1",
+		RecognitionResult(
+			class_id=None,
+			plant_key="cloud:wildflower",
+			plant_name="wildflower",
+			display_name="野花",
+			confidence=0.82,
+			is_recognized=True,
+			source="cloud",
+			catalog_mapped=False,
+			top3=[],
+		),
+	)
+
+	snapshot = stats_service.snapshot_for_region("map_a_r1")
+	assert [item.plant_key for item in snapshot.items] == ["banana", "paddy", "cloud:wildflower"]
+
+
+def test_map_statistics_aggregate_records_for_whole_map(tmp_path) -> None:
 	storage = JsonStorageAdapter(str(tmp_path / "stats.json"), default_value={"regions": {}}, pretty=True)
 	repository = RegionStatsRepository(storage_adapter=storage)
 	recorder = SamplingRecorder(stats_repository=repository)
@@ -70,31 +122,68 @@ def test_statistics_sorts_by_display_name_standard(tmp_path) -> None:
 		"map_a_r1",
 		RecognitionResult(
 			class_id=1,
-			plant_key="zeta",
-			plant_name="zeta",
-			display_name="Zeta",
-			confidence=0.91,
+			plant_key="banana",
+			plant_name="banana",
+			display_name="香蕉",
+			confidence=0.61,
 			is_recognized=True,
-			top3=[(1, 0.91)],
+			top3=[(1, 0.61)],
+		),
+	)
+	recorder.record(
+		"map_a_r1",
+		RecognitionResult(
+			class_id=1,
+			plant_key="banana",
+			plant_name="banana",
+			display_name="香蕉",
+			confidence=0.66,
+			is_recognized=True,
+			top3=[(1, 0.66)],
+		),
+	)
+	recorder.record(
+		"map_a_r2",
+		RecognitionResult(
+			class_id=1,
+			plant_key="banana",
+			plant_name="banana",
+			display_name="香蕉",
+			confidence=0.92,
+			is_recognized=True,
+			top3=[(1, 0.92)],
+		),
+	)
+	recorder.record(
+		"map_a_r2",
+		RecognitionResult(
+			class_id=None,
+			plant_key="cloud:wildflower",
+			plant_name="wildflower",
+			display_name="野花",
+			confidence=0.88,
+			is_recognized=True,
+			source="cloud",
+			catalog_mapped=False,
+			top3=[],
 		),
 	)
 
-	for _ in range(3):
-		recorder.record(
-			"map_a_r1",
-			RecognitionResult(
-				class_id=2,
-				plant_key="alpha",
-				plant_name="alpha",
-				display_name="Alpha",
-				confidence=0.95,
-				is_recognized=True,
-				top3=[(2, 0.95)],
-			),
-		)
+	snapshot = stats_service.snapshot_for_map("map_a")
 
-	snapshot = stats_service.snapshot_for_region("map_a_r1")
-	assert [item.display_name for item in snapshot.items] == ["Alpha", "Zeta"]
+	assert snapshot.map_id == "map_a"
+	assert snapshot.map_display_name == "地图A"
+	assert snapshot.total_region_count == 4
+	assert snapshot.recorded_region_count == 2
+	assert snapshot.plant_species_count == 2
+	assert [item.plant_key for item in snapshot.items] == ["banana", "cloud:wildflower"]
+	assert snapshot.items[0].total_count == 3
+	assert snapshot.items[0].covered_region_count == 2
+	assert snapshot.items[0].last_confidence == 0.92
+	assert snapshot.items[0].catalog_mapped is True
+	assert snapshot.items[1].total_count == 1
+	assert snapshot.items[1].covered_region_count == 1
+	assert snapshot.items[1].catalog_mapped is False
 
 
 def test_sampling_recorder_rejects_invalid_recognized_result(tmp_path) -> None:
@@ -123,14 +212,14 @@ def test_sampling_pages_render_with_view_models() -> None:
 	ctx = StateContext(
 		mode="sampling",
 		available_maps=[
-			{"map_id": "map_a", "display_name": "Map A"},
-			{"map_id": "map_b", "display_name": "Map B"},
+			{"map_id": "map_a", "display_name": "地图A"},
+			{"map_id": "map_b", "display_name": "地图B"},
 		],
 		selected_map_index=1,
 		selected_map_id="map_b",
 		available_regions=[
-			{"region_id": "map_b_r1", "display_name": "Region 1"},
-			{"region_id": "map_b_r2", "display_name": "Region 2"},
+			{"region_id": "map_b_r1", "display_name": "区域1"},
+			{"region_id": "map_b_r2", "display_name": "区域2"},
 		],
 		selected_region_index=0,
 		selected_region_id="map_b_r1",
@@ -142,13 +231,13 @@ def test_sampling_pages_render_with_view_models() -> None:
 	map_lines = MapPage.render(map_vm)
 	region_lines = RegionPage.render(region_vm)
 
-	assert map_vm["selected_map_display_name"] == "Map B"
-	assert region_vm["selected_region_display_name"] == "Region 1"
-	assert map_lines[0] == "[MapSelect]"
-	assert region_lines[0] == "[RegionSelect]"
+	assert map_vm["selected_map_display_name"] == "地图B"
+	assert region_vm["selected_region_display_name"] == "区域1"
+	assert map_lines[0] == "[地图选择]"
+	assert region_lines[0] == "[区域选择]"
 
 	# Stats page should render item list in current page.
-	from domain.models import StatsItem, StatsSnapshot
+	from domain.models import MapStatsItem, MapStatsSnapshot, StatsItem, StatsSnapshot
 
 	ctx.current_stats_snapshot = StatsSnapshot(
 		region_id="map_b_r1",
@@ -156,7 +245,7 @@ def test_sampling_pages_render_with_view_models() -> None:
 			StatsItem(
 				plant_key="paddy",
 				plant_name="paddy",
-				display_name="Paddy",
+				display_name="水稻",
 				count=3,
 				last_confidence=0.88,
 				last_seen_at="2026-01-01T00:00:00+00:00",
@@ -167,8 +256,32 @@ def test_sampling_pages_render_with_view_models() -> None:
 
 	stats_vm = build_view_model(State.STATS, ctx)
 	stats_lines = StatsPage.render(stats_vm)
-	assert stats_lines[0] == "[Stats]"
-	assert any("Paddy" in line for line in stats_lines)
+	assert stats_lines[0] == "[区域统计]"
+	assert any("水稻" in line for line in stats_lines)
+
+	ctx.current_map_stats_snapshot = MapStatsSnapshot(
+		map_id="map_b",
+		map_display_name="地图B",
+		total_region_count=2,
+		recorded_region_count=1,
+		items=[
+			MapStatsItem(
+				plant_key="banana",
+				display_name="香蕉",
+				total_count=4,
+				covered_region_count=1,
+				last_confidence=0.93,
+				catalog_mapped=True,
+			)
+		],
+		page_size=4,
+	)
+
+	map_stats_vm = build_view_model(State.MAP_STATS, ctx)
+	map_stats_lines = MapStatsPage.render(map_stats_vm)
+	assert map_stats_lines[0] == "[地图统计]"
+	assert any("地图B" in line for line in map_stats_lines)
+	assert any("香蕉" in line for line in map_stats_lines)
 
 
 def test_preview_view_model_contains_non_fatal_error_hint() -> None:
@@ -197,7 +310,7 @@ def test_stats_page_renders_warning_for_data_error() -> None:
 
 	lines = StatsPage.render(view_model)
 
-	assert any("warning: DataError: corrupted stats json" in line for line in lines)
+	assert any("警告: DataError: corrupted stats json" in line for line in lines)
 
 
 def test_error_page_render_and_renderer_route() -> None:
@@ -212,8 +325,8 @@ def test_error_page_render_and_renderer_route() -> None:
 
 	assert view_model["error_type"] == "CameraError"
 	assert emitted
-	assert emitted[0][0] == "[Error]"
-	assert any("actions: CONFIRM retry" in line for line in emitted[0])
+	assert emitted[0][0] == "[错误]"
+	assert any("操作: CONFIRM 重试" in line for line in emitted[0])
 
 
 def test_error_page_render_non_retryable_message() -> None:
@@ -225,8 +338,8 @@ def test_error_page_render_non_retryable_message() -> None:
 		}
 	)
 
-	assert lines[0] == "[Error]"
-	assert any("actions: CONFIRM ignored (non-retryable)" in line for line in lines)
+	assert lines[0] == "[错误]"
+	assert any("操作: CONFIRM 忽略（不可重试）" in line for line in lines)
 
 
 def test_additional_state_pages_render_expected_headers() -> None:
@@ -237,14 +350,16 @@ def test_additional_state_pages_render_expected_headers() -> None:
 	preview_lines = PreviewPage.render(build_view_model(State.PREVIEW, ctx))
 	infer_lines = InferencingOverlay.render(build_view_model(State.INFERENCING, ctx))
 
-	assert boot_lines[0] == "[Booting]"
-	assert home_lines[0] == "[Home]"
-	assert any("> sampling" in line for line in home_lines)
-	assert preview_lines[0] == "[Preview]"
-	assert infer_lines[0] == "[Inferencing]"
+	assert boot_lines[0] == "[启动中]"
+	assert home_lines[0] == "[首页]"
+	assert any("> 采样统计" in line for line in home_lines)
+	assert preview_lines[0] == "[预览]"
+	assert infer_lines[0] == "[识别中]"
 
 
 def test_renderer_routes_for_booting_home_preview_inferencing() -> None:
+	from domain.models import MapStatsItem, MapStatsSnapshot
+
 	renderer = Renderer(ui_backend="text")
 	emitted: list[list[str]] = []
 	renderer._emit = lambda lines: emitted.append(lines)
@@ -254,8 +369,27 @@ def test_renderer_routes_for_booting_home_preview_inferencing() -> None:
 	renderer.render(State.HOME, ctx)
 	renderer.render(State.PREVIEW, ctx)
 	renderer.render(State.INFERENCING, ctx)
+	ctx.current_map_stats_snapshot = MapStatsSnapshot(
+		map_id="map_a",
+		map_display_name="地图A",
+		total_region_count=4,
+		recorded_region_count=2,
+		items=[
+			MapStatsItem(
+				plant_key="banana",
+				display_name="香蕉",
+				total_count=3,
+				covered_region_count=2,
+				last_confidence=0.91,
+				catalog_mapped=True,
+			)
+		],
+		page_size=4,
+	)
+	renderer.render(State.MAP_STATS, ctx)
 
-	assert emitted[0][0] == "[Booting]"
-	assert emitted[1][0] == "[Home]"
-	assert emitted[2][0] == "[Preview]"
-	assert emitted[3][0] == "[Inferencing]"
+	assert emitted[0][0] == "[启动中]"
+	assert emitted[1][0] == "[首页]"
+	assert emitted[2][0] == "[预览]"
+	assert emitted[3][0] == "[识别中]"
+	assert emitted[4][0] == "[地图统计]"

@@ -14,8 +14,9 @@ class HomePage:
 		normal_flag = ">" if selected == "normal" else " "
 		sampling_flag = ">" if selected == "sampling" else " "
 
-		lines = ["[Home]"]
-		lines.append(f"  {normal_flag} normal")
-		lines.append(f"  {sampling_flag} sampling")
-		lines.append(f"  hint: {view_model.get('hint')}")
+		lines = ["[首页]"]
+		lines.append(f"  {normal_flag} 普通识别")
+		lines.append(f"  {sampling_flag} 采样统计")
+		lines.append(f"  当前选项: {view_model.get('selected_home_option_display_name')}")
+		lines.append(f"  提示: {view_model.get('hint')}")
 		return lines

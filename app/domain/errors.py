@@ -44,6 +44,26 @@ class InferenceError(RecognizerError):
 	pass
 
 
+class CloudError(RecognizerError):
+	pass
+
+
+class CloudConfigError(CloudError):
+	pass
+
+
+class CloudAuthError(CloudError):
+	pass
+
+
+class CloudTimeoutError(CloudError):
+	pass
+
+
+class CloudRecognitionError(CloudError):
+	pass
+
+
 class StorageError(RecognizerError):
 	pass
 

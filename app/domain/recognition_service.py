@@ -137,6 +137,10 @@ class RecognitionService:
 			display_name=display_name,
 			confidence=output.confidence,
 			is_recognized=recognized,
+			source="local",
+			fallback_used=False,
+			raw_label_name=plant_name,
+			catalog_mapped=recognized,
 			top3=list(output.top3),
 		)
 

@@ -1,8 +1,12 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "ui_language": "zh-CN",
+  "recognition_strategy": "cloud_first",
   "recognition_threshold": 0.6,
   "display_timeout_s": 5.0,
-  "infer_timeout_s": 3.0,
+  "cloud_request_timeout_s": 3.0,
+  "local_infer_timeout_s": 1.5,
+  "infer_timeout_s": 4.5,
   "record_timeout_s": 1.0,
   "capture_debounce_ms": 300,
   "long_press_threshold_ms": 800,
@@ -14,6 +18,8 @@
   "performance_budget": {
     "capture_s": 0.2,
     "infer_s": 2.5,
-    "full_flow_s": 3.0
+    "full_flow_s": 3.0,
+    "cloud_success_s": 3.0,
+    "cloud_fallback_s": 4.5
   }
 }
