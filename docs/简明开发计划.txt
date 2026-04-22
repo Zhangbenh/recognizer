@@ -340,21 +340,18 @@ tracemalloc 监控 100 次 mock 采样循环，内存增长 < 2MB，无线性积
 
 冒烟测试（mock, 0.5min）：PASS，ticks=1263，crashes=0，mem_growth=0.02MB
 
-**在 Raspberry Pi 上执行：**
+**Raspberry Pi 实机执行结果（2026-04-22）：**
 
-```bash
-# 1小时验证（§6.2 ≥1h 要求）
-python scripts/phase5_long_run_stability.py \
-  --runtime real --input gpio --max-minutes 60 \
-  --output reports/phase5_stability_1h_report.json
+| 测试 | 时长 | ticks | crash_count | mem_growth | 结论 |
+|------|------|-------|-------------|------------|------|
+| 1小时稳定性 | 60 min | — | 0 | < 2MB | ✅ overall=true |
+| 3小时稳定性 | 180 min | — | 0 | < 2MB | ✅ overall=true |
 
-# 3小时验证（Feature 4.1 ≥3h 要求）
-python scripts/phase5_long_run_stability.py \
-  --runtime real --input gpio --max-minutes 180 \
-  --output reports/phase5_stability_3h_report.json
-```
+证据：`reports/phase5_stability_1h_report.json`，`reports/phase5_stability_3h_report.json`
 
-状态：⏳ 待 Raspberry Pi 执行
+状态：✅ 完成（用户实机验证通过，2026-04-22）
+
+> 🟢 **阶段五性能与稳定性正式签收。可进入阶段六：最终收尾。**
 
 ---
 
@@ -417,6 +414,52 @@ python scripts/phase5_long_run_stability.py \
 
 * 树莓派实机性能与硬件链路验收仍需在 real 模式执行。
 * 该项已在 7.5 记录中完成并通过。
+
+---
+
+### 7.8 阶段六最终签收（2026-04-22）
+
+#### 签收前提
+
+* 阶段五稳定性验证（real）已完成（见 §7.7）
+* 64 / 64 pytest 回归全部通过
+* 所有交付文件就位
+
+---
+
+#### phase6_release_check.ps1 执行结果（2026-04-22）
+
+```
+[Phase6] START: pytest
+[Phase6] PASS : pytest        ← 64/64 通过
+[Phase6] START: phase4 mock acceptance
+[Phase6] PASS : phase4 mock acceptance  ← 20/20 识别，p95 全满足预算
+[Phase6] START: phase5 mock acceptance
+[Phase6] PASS : phase5 mock acceptance  ← 10/10 循环，stats 记录正常
+[Phase6] ALL CHECKS PASSED
+```
+
+---
+
+#### 交付清单确认
+
+| 类别 | 文件 | 状态 |
+|------|------|------|
+| 启动脚本 | `scripts/run_mock.ps1` | ✅ |
+| 启动脚本 | `scripts/run_real_pi.sh` | ✅ |
+| 收口验证 | `scripts/phase6_release_check.ps1` | ✅ 执行通过 |
+| 说明文档 | `README.md` | ✅ |
+| 部署指南 | `docs/部署指南.txt` | ✅ |
+| 已知问题 | `docs/已知问题清单.txt` | ✅ |
+| 架构设计 | `docs/架构设计_v2.1.txt` | ✅ |
+| 用户故事 | `docs/用户故事及验收标准_v3.txt` | ✅ |
+| 系统说明 | `docs/系统说明文档.txt` | ✅ |
+| 状态机设计 | `docs/状态机设计_v2.0.txt` | ✅ |
+| 长稳脚本 | `scripts/phase5_long_run_stability.py` | ✅ |
+
+---
+
+> 🟢 **阶段六最终收尾正式签收（2026-04-22）。项目全量交付完成。**
 
 ---
 
