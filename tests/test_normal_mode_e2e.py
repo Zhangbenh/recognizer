@@ -55,7 +55,7 @@ def test_infer_fail_preview_warning_flashes_once_then_clears(mock_controller) ->
 	keyboard.push_simulated_event("BTN1_SHORT")
 	_tick_until_state(mock_controller, State.PREVIEW)
 
-	first_count = sum("non_fatal_error_message: infer boom" in chunk for chunk in emitted)
+	first_count = sum("非致命错误信息: infer boom" in chunk for chunk in emitted)
 	assert first_count == 1
 
 	keyboard.push_simulated_event("BTN1_SHORT")
@@ -63,6 +63,6 @@ def test_infer_fail_preview_warning_flashes_once_then_clears(mock_controller) ->
 	mock_controller._state_machine.enqueue(Event(EventType.TIMEOUT, source="test"))
 	_tick_until_state(mock_controller, State.PREVIEW)
 
-	second_count = sum("non_fatal_error_message: infer boom" in chunk for chunk in emitted)
+	second_count = sum("非致命错误信息: infer boom" in chunk for chunk in emitted)
 	assert second_count == 1
 	assert mock_controller._state_machine.context.last_error is None

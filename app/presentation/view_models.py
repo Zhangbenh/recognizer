@@ -39,6 +39,29 @@ def _available_display_names(items: list[dict[str, Any]]) -> list[str]:
 	return names
 
 
+def _selected_value(items: list[dict[str, Any]], selected_id: str | None, id_key: str, field: str) -> Any:
+	for item in items:
+		if str(item.get(id_key) or "") == str(selected_id or ""):
+			return item.get(field)
+	return None
+
+
+def _selection_items(items: list[dict[str, Any]], id_key: str) -> list[dict[str, Any]]:
+	result: list[dict[str, Any]] = []
+	for item in items:
+		item_id = str(item.get(id_key) or item.get("id") or "").strip()
+		if not item_id:
+			continue
+		result.append(
+			{
+				"id": item_id,
+				"display_name": str(item.get("display_name") or item_id),
+				"thumbnail_path": item.get("thumbnail_path"),
+			}
+		)
+	return result
+
+
 def _is_non_fatal_error(error_type: str | None) -> bool:
 	if not error_type:
 		return False
@@ -82,17 +105,21 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 				"map_count": len(ctx.available_maps),
 				"selected_map_display_name": selected_name,
 				"available_map_names": _available_display_names(ctx.available_maps),
+				"selected_map_thumbnail_path": _selected_value(ctx.available_maps, ctx.selected_map_id, "map_id", "thumbnail_path"),
+				"map_items": _selection_items(ctx.available_maps, "map_id"),
 				"hint": "NAV：切换地图 | CONFIRM：进入区域 | NAV_LONG：地图统计 | BACK_LONG：返回首页",
 			}
 		)
 	elif state == State.MAP_STATS:
 		snapshot = ctx.current_map_stats_snapshot
 		selected_map_name = _selected_display_name(ctx.available_maps, ctx.selected_map_id, "map_id")
+		selected_map_thumbnail_path = _selected_value(ctx.available_maps, ctx.selected_map_id, "map_id", "thumbnail_path")
 		if snapshot is None:
 			base.update(
 				{
 					"map_id": ctx.selected_map_id,
 					"map_display_name": selected_map_name,
+					"map_thumbnail_path": selected_map_thumbnail_path,
 					"total_region_count": 0,
 					"recorded_region_count": 0,
 					"plant_species_count": 0,
@@ -126,6 +153,7 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 				{
 					"map_id": snapshot.map_id,
 					"map_display_name": snapshot.map_display_name,
+					"map_thumbnail_path": selected_map_thumbnail_path,
 					"total_region_count": snapshot.total_region_count,
 					"recorded_region_count": snapshot.recorded_region_count,
 					"plant_species_count": snapshot.plant_species_count,
@@ -147,6 +175,8 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 				"region_count": len(ctx.available_regions),
 				"selected_region_display_name": selected_region_name,
 				"available_region_names": _available_display_names(ctx.available_regions),
+				"selected_region_thumbnail_path": _selected_value(ctx.available_regions, ctx.selected_region_id, "region_id", "thumbnail_path"),
+				"region_items": _selection_items(ctx.available_regions, "region_id"),
 				"hint": "NAV：切换区域 | CONFIRM：进入预览 | NAV_LONG：区域统计 | BACK_LONG：返回地图",
 			}
 		)
