@@ -2,6 +2,25 @@
   "version": "1.1.0",
   "maps": [
     {
+      "map_id": "dmrh",
+      "display_name": "DMRH",
+      "thumbnail_path": "assets/maps/map_dmrh.png",
+      "regions": [
+        { "region_id": "dmrh_r1", "display_name": "区域1", "thumbnail_path": "assets/regions/map_dmrh_r1.png" },
+        { "region_id": "dmrh_r2", "display_name": "区域2", "thumbnail_path": "assets/regions/map_dmrh_r2.png" },
+        { "region_id": "dmrh_r3", "display_name": "区域3", "thumbnail_path": "assets/regions/map_dmrh_r3.png" },
+        { "region_id": "dmrh_r4", "display_name": "区域4", "thumbnail_path": "assets/regions/map_dmrh_r4.png" },
+        { "region_id": "dmrh_r5", "display_name": "区域5", "thumbnail_path": "assets/regions/map_dmrh_r5.png" },
+        { "region_id": "dmrh_r6", "display_name": "区域6", "thumbnail_path": "assets/regions/map_dmrh_r6.png" },
+        { "region_id": "dmrh_r7", "display_name": "区域7", "thumbnail_path": "assets/regions/map_dmrh_r7.png" },
+        { "region_id": "dmrh_r8", "display_name": "区域8", "thumbnail_path": "assets/regions/map_dmrh_r8.png" },
+        { "region_id": "dmrh_r9", "display_name": "区域9", "thumbnail_path": "assets/regions/map_dmrh_r9.png" },
+        { "region_id": "dmrh_r10", "display_name": "区域10", "thumbnail_path": "assets/regions/map_dmrh_r10.png" },
+        { "region_id": "dmrh_r11", "display_name": "区域11", "thumbnail_path": "assets/regions/map_dmrh_r11.png" },
+        { "region_id": "dmrh_r12", "display_name": "区域12", "thumbnail_path": "assets/regions/map_dmrh_r12.png" }
+      ]
+    },
+    {
       "map_id": "map_a",
       "display_name": "地图A",
       "thumbnail_path": "assets/maps/map_a_thumb.png",
