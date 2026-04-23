@@ -1,0 +1,738 @@
+{
+  "generated_at": "2026-04-23T05:09:24.578971+00:00",
+  "runtime": "mock",
+  "input_backend": "keyboard",
+  "scenario": "all",
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64",
+    "python": "3.14.0"
+  },
+  "config": {
+    "cycles": 18,
+    "cycles_per_scenario": 6,
+    "map_nav": 1,
+    "region_nav": 1,
+    "max_ticks": 500
+  },
+  "selection": {
+    "selected_region_id": "map_b_r2"
+  },
+  "sampling": {
+    "boot_elapsed_s": 0.003260900000896072,
+    "recognized_count": 18,
+    "recording_seen_count": 0,
+    "recorded_delta_count": 18,
+    "baseline_records_total": 0,
+    "final_records_total": 18,
+    "capture_to_display_s": {
+      "count": 18,
+      "min_s": 0.00014080000073590782,
+      "max_s": 0.0009066000002349028,
+      "mean_s": 0.00035858888885640126,
+      "median_s": 0.0003378999990673037,
+      "p95_s": 0.0008626549995824461,
+      "p99_s": 0.0008978110001044115,
+      "stdev_s": 0.00020977893622925713
+    },
+    "full_cycle_s": {
+      "count": 18,
+      "min_s": 0.0030404000008275034,
+      "max_s": 0.004250400001183152,
+      "mean_s": 0.003408872222381534,
+      "median_s": 0.0033500500003356137,
+      "p95_s": 0.004113635000339855,
+      "p99_s": 0.004223047001014492,
+      "stdev_s": 0.0003229371522920256
+    },
+    "path_counts": {
+      "cloud_success": 6,
+      "cloud_fallback": 6,
+      "local_only": 6,
+      "unknown": 0
+    }
+  },
+  "stats": {
+    "items_count": 3,
+    "total_pages": 1
+  },
+  "pass": {
+    "cloud_success": true,
+    "cloud_fallback": true,
+    "local_only": true,
+    "overall": true
+  },
+  "scenario_results": {
+    "cloud_success": {
+      "scenario": "cloud_success",
+      "config": {
+        "cycles": 6,
+        "map_nav": 1,
+        "region_nav": 1,
+        "max_ticks": 500
+      },
+      "selection": {
+        "selected_region_id": "map_b_r2"
+      },
+      "sampling": {
+        "boot_elapsed_s": 0.0012712999996438157,
+        "recognized_count": 6,
+        "recording_seen_count": 0,
+        "recorded_delta_count": 6,
+        "baseline_records_total": 0,
+        "final_records_total": 6,
+        "capture_to_display_s": {
+          "count": 6,
+          "min_s": 0.0003735999998752959,
+          "max_s": 0.0008548999994673068,
+          "mean_s": 0.0004781500001627137,
+          "median_s": 0.00038500000027852366,
+          "p95_s": 0.000763499999720807,
+          "p99_s": 0.0008366199995180068,
+          "stdev_s": 0.0001731021540484921
+        },
+        "full_cycle_s": {
+          "count": 6,
+          "min_s": 0.0030788999993092148,
+          "max_s": 0.0040895000001910375,
+          "mean_s": 0.003438800000064172,
+          "median_s": 0.0033292999996774597,
+          "p95_s": 0.003994775000137452,
+          "p99_s": 0.00407055500018032,
+          "stdev_s": 0.0003640858918024739
+        },
+        "path_counts": {
+          "cloud_success": 6,
+          "cloud_fallback": 0,
+          "local_only": 0,
+          "unknown": 0
+        }
+      },
+      "stats": {
+        "items_count": 1,
+        "total_pages": 1
+      },
+      "pass": {
+        "state_flow_completed": true,
+        "recognized_exists": true,
+        "recording_path_seen": true,
+        "stats_has_items": true,
+        "expected_path": true,
+        "overall": true
+      },
+      "cycle_details": [
+        {
+          "path": "cloud_success",
+          "source": "cloud",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0004893000004813075,
+          "full_cycle_s": 0.0037105999999766937,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_success",
+          "source": "cloud",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0008548999994673068,
+          "full_cycle_s": 0.0040895000001910375,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_success",
+          "source": "cloud",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.00038110000059532467,
+          "full_cycle_s": 0.0030952000015531667,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_success",
+          "source": "cloud",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0003880000003846362,
+          "full_cycle_s": 0.0030788999993092148,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_success",
+          "source": "cloud",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0003735999998752959,
+          "full_cycle_s": 0.0032142000000021653,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_success",
+          "source": "cloud",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0003820000001724111,
+          "full_cycle_s": 0.003444399999352754,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        }
+      ],
+      "state_trace_tail": [
+        "HOME",
+        "MAP_SELECT",
+        "MAP_SELECT",
+        "REGION_SELECT",
+        "REGION_SELECT",
+        "PREVIEW",
+        "REGION_SELECT",
+        "STATS"
+      ]
+    },
+    "cloud_fallback": {
+      "scenario": "cloud_fallback",
+      "config": {
+        "cycles": 6,
+        "map_nav": 1,
+        "region_nav": 1,
+        "max_ticks": 500
+      },
+      "selection": {
+        "selected_region_id": "map_b_r2"
+      },
+      "sampling": {
+        "boot_elapsed_s": 0.0009824000007938594,
+        "recognized_count": 6,
+        "recording_seen_count": 0,
+        "recorded_delta_count": 6,
+        "baseline_records_total": 0,
+        "final_records_total": 6,
+        "capture_to_display_s": {
+          "count": 6,
+          "min_s": 0.00030359999982465524,
+          "max_s": 0.0009066000002349028,
+          "mean_s": 0.00042689999978999066,
+          "median_s": 0.0003378999990673037,
+          "p95_s": 0.0007722250002188957,
+          "p99_s": 0.0008797250002317015,
+          "stdev_s": 0.00021590792808509648
+        },
+        "full_cycle_s": {
+          "count": 6,
+          "min_s": 0.0032272999997076113,
+          "max_s": 0.004250400001183152,
+          "mean_s": 0.003510150000693102,
+          "median_s": 0.0034195000007457566,
+          "p95_s": 0.004059225001128652,
+          "p99_s": 0.004212165001172253,
+          "stdev_s": 0.0003456483367432171
+        },
+        "path_counts": {
+          "cloud_success": 0,
+          "cloud_fallback": 6,
+          "local_only": 0,
+          "unknown": 0
+        }
+      },
+      "stats": {
+        "items_count": 1,
+        "total_pages": 1
+      },
+      "pass": {
+        "state_flow_completed": true,
+        "recognized_exists": true,
+        "recording_path_seen": true,
+        "stats_has_items": true,
+        "expected_path": true,
+        "overall": true
+      },
+      "cycle_details": [
+        {
+          "path": "cloud_fallback",
+          "source": "local",
+          "fallback_used": true,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0003691000001708744,
+          "full_cycle_s": 0.003354300000864896,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_fallback",
+          "source": "local",
+          "fallback_used": true,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0003063000003749039,
+          "full_cycle_s": 0.003485700000965153,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_fallback",
+          "source": "local",
+          "fallback_used": true,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0003197999994881684,
+          "full_cycle_s": 0.003484700000626617,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_fallback",
+          "source": "local",
+          "fallback_used": true,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0009066000002349028,
+          "full_cycle_s": 0.004250400001183152,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_fallback",
+          "source": "local",
+          "fallback_used": true,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.00035599999864643905,
+          "full_cycle_s": 0.0032272999997076113,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "cloud_fallback",
+          "source": "local",
+          "fallback_used": true,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.00030359999982465524,
+          "full_cycle_s": 0.003258500000811182,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        }
+      ],
+      "state_trace_tail": [
+        "HOME",
+        "MAP_SELECT",
+        "MAP_SELECT",
+        "REGION_SELECT",
+        "REGION_SELECT",
+        "PREVIEW",
+        "REGION_SELECT",
+        "STATS"
+      ]
+    },
+    "local_only": {
+      "scenario": "local_only",
+      "config": {
+        "cycles": 6,
+        "map_nav": 1,
+        "region_nav": 1,
+        "max_ticks": 500
+      },
+      "selection": {
+        "selected_region_id": "map_b_r2"
+      },
+      "sampling": {
+        "boot_elapsed_s": 0.001007200000458397,
+        "recognized_count": 6,
+        "recording_seen_count": 0,
+        "recorded_delta_count": 6,
+        "baseline_records_total": 0,
+        "final_records_total": 6,
+        "capture_to_display_s": {
+          "count": 6,
+          "min_s": 0.00014080000073590782,
+          "max_s": 0.0002403999988018768,
+          "mean_s": 0.00017071666661649942,
+          "median_s": 0.00015970000094966963,
+          "p95_s": 0.00022587499870496686,
+          "p99_s": 0.00023749499878249482,
+          "stdev_s": 3.440607514768953e-05
+        },
+        "full_cycle_s": {
+          "count": 6,
+          "min_s": 0.0030404000008275034,
+          "max_s": 0.003545499999745516,
+          "mean_s": 0.003277666666387328,
+          "median_s": 0.003327749999698426,
+          "p95_s": 0.0035027249996346654,
+          "p99_s": 0.003536944999723346,
+          "stdev_s": 0.00018018364384148877
+        },
+        "path_counts": {
+          "cloud_success": 0,
+          "cloud_fallback": 0,
+          "local_only": 6,
+          "unknown": 0
+        }
+      },
+      "stats": {
+        "items_count": 1,
+        "total_pages": 1
+      },
+      "pass": {
+        "state_flow_completed": true,
+        "recognized_exists": true,
+        "recording_path_seen": true,
+        "stats_has_items": true,
+        "expected_path": true,
+        "overall": true
+      },
+      "cycle_details": [
+        {
+          "path": "local_only",
+          "source": "local",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.00014139999984763563,
+          "full_cycle_s": 0.0033096999995905207,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "local_only",
+          "source": "local",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.0002403999988018768,
+          "full_cycle_s": 0.003545499999745516,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "local_only",
+          "source": "local",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.00018229999841423705,
+          "full_cycle_s": 0.0030501999990519835,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "local_only",
+          "source": "local",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.00015210000128718093,
+          "full_cycle_s": 0.0030404000008275034,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "local_only",
+          "source": "local",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.00016730000061215833,
+          "full_cycle_s": 0.0033743999993021134,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        },
+        {
+          "path": "local_only",
+          "source": "local",
+          "fallback_used": false,
+          "recognized": true,
+          "display_name": "芦荟",
+          "capture_to_display_s": 0.00014080000073590782,
+          "full_cycle_s": 0.0033457999998063315,
+          "ticks_to_display": 1,
+          "ticks_to_preview": 1,
+          "recording_seen": false
+        }
+      ],
+      "state_trace_tail": [
+        "HOME",
+        "MAP_SELECT",
+        "MAP_SELECT",
+        "REGION_SELECT",
+        "REGION_SELECT",
+        "PREVIEW",
+        "REGION_SELECT",
+        "STATS"
+      ]
+    }
+  },
+  "cycle_details": [
+    {
+      "path": "cloud_success",
+      "source": "cloud",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0004893000004813075,
+      "full_cycle_s": 0.0037105999999766937,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_success",
+      "source": "cloud",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0008548999994673068,
+      "full_cycle_s": 0.0040895000001910375,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_success",
+      "source": "cloud",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.00038110000059532467,
+      "full_cycle_s": 0.0030952000015531667,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_success",
+      "source": "cloud",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0003880000003846362,
+      "full_cycle_s": 0.0030788999993092148,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_success",
+      "source": "cloud",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0003735999998752959,
+      "full_cycle_s": 0.0032142000000021653,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_success",
+      "source": "cloud",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0003820000001724111,
+      "full_cycle_s": 0.003444399999352754,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_fallback",
+      "source": "local",
+      "fallback_used": true,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0003691000001708744,
+      "full_cycle_s": 0.003354300000864896,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_fallback",
+      "source": "local",
+      "fallback_used": true,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0003063000003749039,
+      "full_cycle_s": 0.003485700000965153,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_fallback",
+      "source": "local",
+      "fallback_used": true,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0003197999994881684,
+      "full_cycle_s": 0.003484700000626617,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_fallback",
+      "source": "local",
+      "fallback_used": true,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0009066000002349028,
+      "full_cycle_s": 0.004250400001183152,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_fallback",
+      "source": "local",
+      "fallback_used": true,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.00035599999864643905,
+      "full_cycle_s": 0.0032272999997076113,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "cloud_fallback",
+      "source": "local",
+      "fallback_used": true,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.00030359999982465524,
+      "full_cycle_s": 0.003258500000811182,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "local_only",
+      "source": "local",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.00014139999984763563,
+      "full_cycle_s": 0.0033096999995905207,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "local_only",
+      "source": "local",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.0002403999988018768,
+      "full_cycle_s": 0.003545499999745516,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "local_only",
+      "source": "local",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.00018229999841423705,
+      "full_cycle_s": 0.0030501999990519835,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "local_only",
+      "source": "local",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.00015210000128718093,
+      "full_cycle_s": 0.0030404000008275034,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "local_only",
+      "source": "local",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.00016730000061215833,
+      "full_cycle_s": 0.0033743999993021134,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    },
+    {
+      "path": "local_only",
+      "source": "local",
+      "fallback_used": false,
+      "recognized": true,
+      "display_name": "芦荟",
+      "capture_to_display_s": 0.00014080000073590782,
+      "full_cycle_s": 0.0033457999998063315,
+      "ticks_to_display": 1,
+      "ticks_to_preview": 1,
+      "recording_seen": false
+    }
+  ],
+  "state_trace_tail": [
+    "HOME",
+    "MAP_SELECT",
+    "MAP_SELECT",
+    "REGION_SELECT",
+    "REGION_SELECT",
+    "PREVIEW",
+    "REGION_SELECT",
+    "STATS",
+    "HOME",
+    "MAP_SELECT",
+    "MAP_SELECT",
+    "REGION_SELECT",
+    "REGION_SELECT",
+    "PREVIEW",
+    "REGION_SELECT",
+    "STATS",
+    "HOME",
+    "MAP_SELECT",
+    "MAP_SELECT",
+    "REGION_SELECT",
+    "REGION_SELECT",
+    "PREVIEW",
+    "REGION_SELECT",
+    "STATS"
+  ]
+}

@@ -4,7 +4,7 @@ Phase 5 采样模式验收指南
 v1.1 回填说明
 ------------
 本指南仍用于验证 Phase 5 的“区域采样主链路”是否完整，即 `MAP_SELECT -> REGION_SELECT -> ... -> STATS`。
-v1.1 新增的云端优先识别、地图级汇总统计 `MAP_STATS`、以及图片化选择页交互，不以本指南作为唯一验收依据，应结合 `docs/v1.1_补丁开发文档.txt` 与更新后的用户故事/设计文档一并验收。
+v1.1 最终验收建议把自动化与手测拆开执行：自动化脚本负责验证 `cloud_success`、`cloud_fallback`、`local_only` 三条确定性链路的状态流与录制结果；screen 后端手测负责补充 `MAP_STATS` 导航、图片化选择页和真实云端连通性确认。
 
 目标
 ----
@@ -21,21 +21,35 @@ HOME(采样) -> MAP_SELECT -> REGION_SELECT -> PREVIEW -> CAPTURED -> INFERENCIN
 推荐执行方式（仓库根目录）
 ----------------------
 1) 本地快速验收（mock）
-   c:/Users/31702/Desktop/recognizer/recognizer/.venv/Scripts/python.exe scripts/phase5_sampling_mode_acceptance.py --runtime mock --input keyboard --cycles 10 --print-cycles
+   c:/Users/31702/Desktop/recognizer/recognizer/.venv/Scripts/python.exe scripts/phase5_sampling_mode_acceptance.py --runtime mock --input keyboard --scenario all --cycles 10 --print-cycles
 
 2) 树莓派实机验收（real + keyboard）
-   python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20 --map-nav 1 --region-nav 2 --print-cycles
+   python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --scenario all --cycles 20 --map-nav 1 --region-nav 2 --print-cycles
 
 3) 树莓派 GPIO 输入场景
    说明：脚本需要模拟按键注入，GPIO 后端不支持模拟输入，当前脚本不适用于 --input gpio。
    建议：使用 keyboard 后端进行自动化验收，GPIO 场景走手工验收。
 
+4) 链路隔离排障（可选）
+   python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --scenario cloud_success --cycles 10 --output reports/phase5_cloud_success.json
+   python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --scenario cloud_fallback --cycles 10 --output reports/phase5_cloud_fallback.json
+   python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --scenario local_only --cycles 10 --output reports/phase5_local_only.json
+
 在 app 子目录执行时
 ------------------
 - 本地 mock:
-  c:/Users/31702/Desktop/recognizer/recognizer/.venv/Scripts/python.exe ../scripts/phase5_sampling_mode_acceptance.py --runtime mock --input keyboard --cycles 10
+   c:/Users/31702/Desktop/recognizer/recognizer/.venv/Scripts/python.exe ../scripts/phase5_sampling_mode_acceptance.py --runtime mock --input keyboard --scenario all --cycles 10
 - 树莓派 real:
-  python ../scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20
+   python ../scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --scenario all --cycles 20
+
+v1.1 最终验收补充手测
+----------------------
+建议在 screen 后端再补一轮手测，至少确认以下事项：
+- `MAP_SELECT` 能看到当前地图图片/缩略图，高亮切换与确认进入正常
+- `MAP_SELECT + NAV_LONG_PRESS -> MAP_STATS`，`BACK_LONG_PRESS -> MAP_SELECT`
+- `REGION_SELECT` 能看到当前区域图片/缩略图，高亮切换与确认进入正常
+- `REGION_SELECT + NAV_LONG_PRESS -> STATS`，`BACK_LONG_PRESS -> MAP_SELECT`
+- 配好真实凭据和网络后做 1 次 real 模式识别；断网后再做 1 次识别，确认仍能回退本地
 
 输出
 ----
@@ -47,20 +61,30 @@ HOME(采样) -> MAP_SELECT -> REGION_SELECT -> PREVIEW -> CAPTURED -> INFERENCIN
 
 报告关键字段
 ------------
+- pass.cloud_success / pass.cloud_fallback / pass.local_only：多链路模式下的场景汇总结果
+- pass.overall：综合判定
+- scenario_results.<scenario>.pass.expected_path：该场景是否稳定落在预期识别路径
 - pass.state_flow_completed：是否完成完整状态路径
 - pass.recognized_exists：是否至少出现一次识别成功
 - pass.recording_path_seen：区域统计计数是否出现正增量（用于判定录制链路生效）
 - pass.stats_has_items：STATS 是否有数据
-- pass.overall：综合判定
 - sampling.capture_to_display_s.p95_s
 - sampling.full_cycle_s.p95_s
+- sampling.path_counts：聚合路径计数
+- stats.items_count / stats.total_pages：区域统计页输出规模
 
 通过判定建议
 ------------
-- overall = true
-- recognized_count > 0
-- recorded_delta_count > 0
-- stats.items_count > 0
+- 使用 `--scenario all` 时：
+   - pass.cloud_success = true
+   - pass.cloud_fallback = true
+   - pass.local_only = true
+   - pass.overall = true
+- 自动化报告还应满足：
+   - recognized_count > 0
+   - recorded_delta_count > 0
+   - stats.items_count > 0
+- 若需核对具体链路是否命中，查看 `scenario_results.<scenario>.pass.expected_path`
 
 常见问题
 --------
@@ -81,3 +105,10 @@ HOME(采样) -> MAP_SELECT -> REGION_SELECT -> PREVIEW -> CAPTURED -> INFERENCIN
    - 固定设备和光照
    - 使用清晰样本重新测试
    - 先用 mock 验证状态流，再排查模型输入质量
+
+4) `--scenario all` 通过了，但真实百度云是否可用仍不确定
+   原因：验收脚本中的三链路模式是确定性编排验收，不直接访问真实百度云。
+   解决：
+   - 配置好凭据后，用主程序 real 模式联网实拍 1 次
+   - 断网后再实拍 1 次，确认仍能回退本地
+   - 把这两次结果记入交付手测记录

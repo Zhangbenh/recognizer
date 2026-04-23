@@ -208,6 +208,35 @@ def test_sampling_recorder_rejects_invalid_recognized_result(tmp_path) -> None:
 		pass
 
 
+def test_sampling_recorder_accepts_cloud_extension_key_and_region_stats_preserve_it(tmp_path) -> None:
+	storage = JsonStorageAdapter(str(tmp_path / "stats.json"), default_value={"regions": {}}, pretty=True)
+	repository = RegionStatsRepository(storage_adapter=storage)
+	recorder = SamplingRecorder(stats_repository=repository)
+	stats_service = StatisticsQueryService(stats_repository=repository)
+
+	result = RecognitionResult(
+		class_id=None,
+		plant_key="cloud:野花",
+		plant_name="野花",
+		display_name="野花",
+		confidence=0.91,
+		is_recognized=True,
+		source="cloud",
+		catalog_mapped=False,
+		raw_label_name="野花",
+		top3=[],
+	)
+
+	recorder.record("map_a_r1", result)
+	recorder.record("map_a_r1", result)
+
+	snapshot = stats_service.snapshot_for_region("map_a_r1")
+	assert len(snapshot.items) == 1
+	assert snapshot.items[0].plant_key == "cloud:野花"
+	assert snapshot.items[0].display_name == "野花"
+	assert snapshot.items[0].count == 2
+
+
 def test_sampling_pages_render_with_view_models() -> None:
 	ctx = StateContext(
 		mode="sampling",
@@ -232,7 +261,9 @@ def test_sampling_pages_render_with_view_models() -> None:
 	region_lines = RegionPage.render(region_vm)
 
 	assert map_vm["selected_map_display_name"] == "地图B"
+	assert map_vm["selected_map_thumbnail_path"] is None
 	assert region_vm["selected_region_display_name"] == "区域1"
+	assert region_vm["selected_region_thumbnail_path"] is None
 	assert map_lines[0] == "[地图选择]"
 	assert region_lines[0] == "[区域选择]"
 
@@ -282,6 +313,46 @@ def test_sampling_pages_render_with_view_models() -> None:
 	assert map_stats_lines[0] == "[地图统计]"
 	assert any("地图B" in line for line in map_stats_lines)
 	assert any("香蕉" in line for line in map_stats_lines)
+	assert map_stats_vm["map_thumbnail_path"] is None
+
+
+def test_selection_view_models_include_thumbnail_entry_points() -> None:
+	ctx = StateContext(
+		mode="sampling",
+		available_maps=[
+			{
+				"map_id": "map_a",
+				"display_name": "地图A",
+				"thumbnail_path": "assets/maps/map_a_thumb.png",
+				"regions": [
+					{
+						"region_id": "map_a_r1",
+						"display_name": "区域1",
+						"thumbnail_path": "assets/regions/map_a_r1_thumb.png",
+					}
+				],
+			}
+		],
+		selected_map_index=0,
+		selected_map_id="map_a",
+		available_regions=[
+			{
+				"region_id": "map_a_r1",
+				"display_name": "区域1",
+				"thumbnail_path": "assets/regions/map_a_r1_thumb.png",
+			}
+		],
+		selected_region_index=0,
+		selected_region_id="map_a_r1",
+	)
+
+	map_vm = build_view_model(State.MAP_SELECT, ctx)
+	region_vm = build_view_model(State.REGION_SELECT, ctx)
+
+	assert map_vm["selected_map_thumbnail_path"] == "assets/maps/map_a_thumb.png"
+	assert map_vm["map_items"][0]["thumbnail_path"] == "assets/maps/map_a_thumb.png"
+	assert region_vm["selected_region_thumbnail_path"] == "assets/regions/map_a_r1_thumb.png"
+	assert region_vm["region_items"][0]["thumbnail_path"] == "assets/regions/map_a_r1_thumb.png"
 
 
 def test_preview_view_model_contains_non_fatal_error_hint() -> None:

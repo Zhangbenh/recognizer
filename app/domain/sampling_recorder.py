@@ -29,7 +29,8 @@ class SamplingRecorder:
 	def record(self, region_id: str, result: RecognitionResult) -> None:
 		if not region_id:
 			raise StorageError("region_id is required for recording", retryable=False)
-		if result.is_recognized and not result.plant_key:
+		plant_key = str(result.plant_key or "").strip()
+		if result.is_recognized and not plant_key:
 			raise DataError("recognized result missing plant_key", retryable=False)
 		if not result.is_recognized:
 			return
@@ -39,7 +40,6 @@ class SamplingRecorder:
 		region_entry = regions.setdefault(region_id, {"records": {}})
 		records = region_entry.setdefault("records", {})
 
-		plant_key = result.plant_key
 		entry = records.setdefault(
 			plant_key,
 			{

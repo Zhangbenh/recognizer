@@ -5,8 +5,8 @@
 
 ## 0. 文档信息
 
-- 文档版本：v1.1-draft
-- 文档日期：2026-04-22
+- 文档版本：v1.1-final
+- 文档日期：2026-04-23
 - 适用对象：产品设计、架构设计、状态机设计、实现开发、测试验收、部署交付
 - 文档定位：用于正式归档 v1.1 补丁的产品边界、架构补丁、状态机补丁、实现计划与验证方案
 
@@ -842,12 +842,11 @@ v1.1 部署新增内容：
 
 ### 15.2 环境变量建议
 
-建议支持：
+v1.1 最终口径按以下规则交付：
 
-- `BAIDU_API_KEY`
-- `BAIDU_SECRET_KEY`
-- `RECOGNIZER_UI_LANGUAGE`
-- `RECOGNIZER_UI_BACKEND`
+- 敏感凭据优先级：`RECOGNIZER_BAIDU_API_KEY` / `RECOGNIZER_BAIDU_SECRET_KEY` 直接值 > `RECOGNIZER_BAIDU_API_KEY_ENV` / `RECOGNIZER_BAIDU_SECRET_KEY_ENV` 指定环境变量名 > `cloud_config.json` 中的 `api_key_env` / `secret_key_env`
+- 非敏感云端覆盖项：`RECOGNIZER_BAIDU_API_ENDPOINT`、`RECOGNIZER_BAIDU_TOKEN_ENDPOINT`、`RECOGNIZER_BAIDU_REQUEST_TIMEOUT_S`、`RECOGNIZER_BAIDU_RETRY_COUNT`、`RECOGNIZER_BAIDU_TOKEN_CACHE_FILE`
+- UI 与启动参数仍通过主程序命令行和既有运行环境变量控制，不要求把云端凭据明文写入仓库
 
 ### 15.3 旧数据兼容性
 
@@ -911,7 +910,16 @@ v1.1 落地时，以下文档需要同步修订：
 - `状态机设计_v2.0.txt`
 - `代码结构设计文档_v1.3.1.txt`
 - `用户故事及验收标准_v3.txt`
-- 必要时补充新的部署说明和验收指南
+- `部署指南.txt`
+- `phase4_real_runtime_验收指南.txt`
+- `phase5_sampling_mode_验收指南.txt`
+- `phase7_实机签收清单.txt`
+- `v1.1_升级说明.txt`
+
+补充说明：
+
+- v1.1 自动化验收默认以确定性三链路 `cloud_success` / `cloud_fallback` / `local_only` 为准
+- 真实百度云连通性与 screen 图片页仍要求在交付前补充人工手测
 
 ---
 

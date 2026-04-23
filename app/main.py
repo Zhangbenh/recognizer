@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+from typing import Any
 from controller.app_controller import AppController, build_app_controller
 from infrastructure.logging.logger import create_logger
 from infrastructure.storage.json_storage_adapter import JsonStorageAdapter
@@ -14,13 +15,25 @@ def default_input_backend() -> str:
 	return "keyboard" if os.name == "nt" else "gpio"
 
 
-def build_controller(*, runtime_backend: str, input_backend: str, ui_backend: str, logger: logging.Logger) -> AppController:
+def build_controller(
+	*, runtime_backend: str, input_backend: str, ui_backend: str, logger: logging.Logger, **build_kwargs: Any
+) -> AppController:
+	storage_adapter_factory = build_kwargs.pop("storage_adapter_factory", JsonStorageAdapter)
+	label_repository = build_kwargs.pop("label_repository", None)
+	model_manifest_repository = build_kwargs.pop("model_manifest_repository", None)
+	sampling_config_repository = build_kwargs.pop("sampling_config_repository", None)
+	system_config_repository = build_kwargs.pop("system_config_repository", None)
 	return build_app_controller(
 		runtime_backend=runtime_backend,
 		input_backend=input_backend,
 		ui_backend=ui_backend,
 		logger=logger,
-		storage_adapter_factory=JsonStorageAdapter,
+		storage_adapter_factory=storage_adapter_factory,
+		label_repository=label_repository,
+		model_manifest_repository=model_manifest_repository,
+		sampling_config_repository=sampling_config_repository,
+		system_config_repository=system_config_repository,
+		**build_kwargs,
 	)
 
 

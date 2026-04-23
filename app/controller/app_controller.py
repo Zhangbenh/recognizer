@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import json
 import logging
 import time
 from pathlib import Path
@@ -32,8 +34,15 @@ from application.state_handlers import (
 from domain.release_gate_service import ReleaseGateService
 from domain.sampling_recorder import SamplingRecorder
 from domain.statistics_query_service import StatisticsQueryService
+from infrastructure.cloud.baidu_plant_client import (
+	BaiduPlantCandidate,
+	BaiduPlantClient,
+	BaiduPlantResponse,
+)
 from infrastructure.camera.base_camera_adapter import BaseCameraAdapter
 from infrastructure.camera.picamera2_adapter import Picamera2Adapter
+from infrastructure.config.baidu_mapping_repository import BaiduMappingRepository
+from infrastructure.config.cloud_config_repository import CloudConfigRepository
 from infrastructure.config.label_repository import LabelRepository
 from infrastructure.config.model_manifest_repository import ModelManifestRepository
 from infrastructure.config.sampling_config_repository import SamplingConfigRepository
@@ -253,6 +262,18 @@ class _MockInferenceAdapter(BaseInferenceAdapter):
 		self._loaded = False
 
 
+class _MockBaiduPlantClient:
+	"""Desktop-safe cloud client stub for mock runtime wiring."""
+
+	def recognize_image_bytes(self, image_bytes: bytes, *, baike_num: int = 0) -> BaiduPlantResponse:
+		_ = image_bytes, baike_num
+		return BaiduPlantResponse(
+			log_id=0,
+			candidates=[BaiduPlantCandidate(name="芦荟", score=0.96)],
+			raw_payload={"result": [{"name": "芦荟", "score": 0.96}]},
+		)
+
+
 def _build_runtime_adapters(
 	*, runtime_backend: str, expected_output_classes: int
 ) -> tuple[BaseCameraAdapter, BaseInferenceAdapter]:
@@ -267,6 +288,49 @@ def _build_runtime_adapters(
 	)
 	inference_adapter = TFLiteAdapter(expected_output_classes=expected_output_classes)
 	return camera_adapter, inference_adapter
+
+
+def _build_cloud_client(*, runtime_backend: str, config_repository: CloudConfigRepository):
+	if runtime_backend == "mock":
+		return _MockBaiduPlantClient()
+	return BaiduPlantClient(config_repository=config_repository)
+
+
+def _encode_frame_for_cloud(frame: Any) -> bytes:
+	if frame is None:
+		raise ValueError("frame is empty")
+
+	if isinstance(frame, (bytes, bytearray, memoryview)):
+		return bytes(frame)
+
+	if isinstance(frame, (dict, list, tuple, str, int, float, bool)):
+		return json.dumps(frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
+
+	try:
+		import numpy as np
+	except ImportError:
+		np = None
+
+	if np is not None and isinstance(frame, np.ndarray):
+		array = frame
+		if array.ndim == 4 and array.shape[0] == 1:
+			array = array[0]
+		if array.ndim != 3 or array.shape[2] != 3:
+			raise ValueError("cloud frame encoder expects RGB image shape (H, W, 3)")
+
+		try:
+			from PIL import Image
+		except ImportError as exc:
+			raise RuntimeError(
+				"Pillow is required for cloud frame encoding from numpy arrays."
+			) from exc
+
+		buffer = io.BytesIO()
+		image = Image.fromarray(array.astype("uint8", copy=False), mode="RGB")
+		image.save(buffer, format="PNG")
+		return buffer.getvalue()
+
+	raise TypeError(f"unsupported frame type for cloud encoding: {type(frame).__name__}")
 
 
 def _build_input_adapter(*, input_backend: str, system_config: SystemConfigRepository):
@@ -291,22 +355,41 @@ def build_app_controller(
 	ui_backend: str = "text",
 	logger: logging.Logger,
 	storage_adapter_factory: Callable[..., Any] = JsonStorageAdapter,
+	label_repository: LabelRepository | None = None,
+	model_manifest_repository: ModelManifestRepository | None = None,
+	sampling_config_repository: SamplingConfigRepository | None = None,
+	system_config_repository: SystemConfigRepository | None = None,
+	camera_adapter: BaseCameraAdapter | None = None,
+	inference_adapter: BaseInferenceAdapter | None = None,
+	cloud_config_repository: CloudConfigRepository | None = None,
+	baidu_mapping_repository: BaiduMappingRepository | None = None,
+	baidu_plant_client: Any | None = None,
+	frame_encoder: Callable[[Any], bytes] | None = None,
 ) -> AppController:
 	repo_root = Path(__file__).resolve().parents[2]
 	data_file = repo_root / "data" / "sampling_records.json"
 
-	label_repository = LabelRepository()
-	model_manifest_repository = ModelManifestRepository()
-	sampling_config_repository = SamplingConfigRepository()
-	system_config_repository = SystemConfigRepository()
+	label_repository = label_repository or LabelRepository()
+	model_manifest_repository = model_manifest_repository or ModelManifestRepository()
+	sampling_config_repository = sampling_config_repository or SamplingConfigRepository()
+	system_config_repository = system_config_repository or SystemConfigRepository()
+	cloud_config_repository = cloud_config_repository or CloudConfigRepository()
+	baidu_mapping_repository = baidu_mapping_repository or BaiduMappingRepository()
 	storage_adapter = storage_adapter_factory(str(data_file), default_value={"regions": {}}, pretty=True)
 	stats_repository = RegionStatsRepository(storage_adapter=storage_adapter)
 
 	expected_output_classes = model_manifest_repository.output_classes()
-	camera_adapter, inference_adapter = _build_runtime_adapters(
+	default_camera_adapter, default_inference_adapter = _build_runtime_adapters(
 		runtime_backend=runtime_backend,
 		expected_output_classes=expected_output_classes,
 	)
+	camera_adapter = camera_adapter or default_camera_adapter
+	inference_adapter = inference_adapter or default_inference_adapter
+	baidu_plant_client = baidu_plant_client or _build_cloud_client(
+		runtime_backend=runtime_backend,
+		config_repository=cloud_config_repository,
+	)
+	frame_encoder = frame_encoder or _encode_frame_for_cloud
 	input_adapter = _build_input_adapter(input_backend=input_backend, system_config=system_config_repository)
 
 	recognition_service = RecognitionService(
@@ -315,6 +398,9 @@ def build_app_controller(
 		label_repository=label_repository,
 		model_manifest_repository=model_manifest_repository,
 		system_config_repository=system_config_repository,
+		baidu_plant_client=baidu_plant_client,
+		baidu_mapping_repository=baidu_mapping_repository,
+		frame_encoder=frame_encoder,
 		logger=logger,
 	)
 	release_gate_service = ReleaseGateService(
@@ -337,7 +423,7 @@ def build_app_controller(
 		),
 		State.HOME: HomeHandler(),
 		State.MAP_SELECT: MapSelectHandler(sampling_config_repository=sampling_config_repository),
-			State.MAP_STATS: MapStatsHandler(statistics_query_service=statistics_query_service),
+		State.MAP_STATS: MapStatsHandler(statistics_query_service=statistics_query_service),
 		State.REGION_SELECT: RegionSelectHandler(sampling_config_repository=sampling_config_repository),
 		State.PREVIEW: PreviewHandler(),
 		State.CAPTURED: CapturedHandler(),

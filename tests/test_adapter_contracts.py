@@ -11,6 +11,8 @@ from domain import MapStatsItem, MapStatsSnapshot
 from domain.errors import CloudTimeoutError, ConfigError, LabelError, ModelError
 from domain.models import RecognitionResult
 from domain.release_gate_service import ReleaseGateService
+from infrastructure.config.baidu_mapping_repository import BaiduMappingRepository
+from infrastructure.config.cloud_config_repository import CloudConfigRepository
 from infrastructure.config.label_repository import LabelRepository
 from infrastructure.config.model_manifest_repository import ModelManifestRepository
 from infrastructure.config.sampling_config_repository import SamplingConfigRepository
@@ -134,6 +136,28 @@ def test_config_repositories_contracts_and_release_gate() -> None:
 		system_config_repository=system_repo,
 	)
 	assert release_gate.check() is True
+
+
+def test_cloud_config_and_mapping_repository_contracts(monkeypatch: pytest.MonkeyPatch) -> None:
+	monkeypatch.setenv("BAIDU_API_KEY", "config-api-key")
+	monkeypatch.setenv("BAIDU_SECRET_KEY", "config-secret-key")
+	monkeypatch.setenv("RECOGNIZER_BAIDU_REQUEST_TIMEOUT_S", "3.25")
+
+	cloud_repo = CloudConfigRepository()
+	mapping_repo = BaiduMappingRepository()
+	config = cloud_repo.load()
+
+	assert config.baidu_api_endpoint.endswith("/rest/2.0/image-classify/v1/plant")
+	assert config.baidu_token_endpoint.endswith("/oauth/2.0/token")
+	assert config.request_timeout_s == 3.25
+	assert config.retry_count == 1
+	assert config.api_key == "config-api-key"
+	assert config.secret_key == "config-secret-key"
+	assert config.api_key_env_name == "BAIDU_API_KEY"
+	assert config.secret_key_env_name == "BAIDU_SECRET_KEY"
+	assert config.token_cache_file.name == ".baidu_token_cache.json"
+	assert mapping_repo.plant_key_for(" 辣椒 ") == "peperchili"
+	assert mapping_repo.plant_key_for("不存在的植物") is None
 
 
 def test_label_repository_invalid_payload_raises_label_error(tmp_path) -> None:

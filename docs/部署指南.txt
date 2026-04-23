@@ -49,7 +49,31 @@ python3 -m pip install ai-edge-litert numpy pillow
 
 补充说明：
 - `system_config.json` 在 v1.1 下新增 `ui_language`、`recognition_strategy`、`cloud_request_timeout_s`、`local_infer_timeout_s`
-- 云端敏感信息建议通过环境变量覆盖，不要求明文写入版本库
+- 运行时真实落盘数据统一为 `data/sampling_records.json`，内部结构按 `regions.<region_id>.records.<plant_key>` 组织
+
+3.1 v1.1 新增配置准备
+----------------------
+- `config/cloud_config.json`：保留接口地址、超时、重试与凭据环境变量名；默认 token 缓存文件为 `data/.baidu_token_cache.json`
+- `config/baidu_plant_mapping.json`：维护“百度中文名 -> 本地 plant_key”映射；未命中映射时，系统会生成稳定的 `cloud:` 命名空间键入统
+- `config/sampling_config.json`：v1.1 交付时应同时校验地图/区域中文显示名与缩略图路径
+
+3.2 云端环境变量覆盖优先级
+--------------------------
+敏感信息优先级固定为：
+- `RECOGNIZER_BAIDU_API_KEY` / `RECOGNIZER_BAIDU_SECRET_KEY` 直接值
+- `RECOGNIZER_BAIDU_API_KEY_ENV` / `RECOGNIZER_BAIDU_SECRET_KEY_ENV` 指向的环境变量名
+- `config/cloud_config.json` 中的 `api_key_env` / `secret_key_env`
+
+非敏感字段可按需使用以下覆盖项：
+- `RECOGNIZER_BAIDU_API_ENDPOINT`
+- `RECOGNIZER_BAIDU_TOKEN_ENDPOINT`
+- `RECOGNIZER_BAIDU_REQUEST_TIMEOUT_S`
+- `RECOGNIZER_BAIDU_RETRY_COUNT`
+- `RECOGNIZER_BAIDU_TOKEN_CACHE_FILE`
+
+部署建议：
+- 版本库中的 `cloud_config.json` 只保留环境变量名，不直接写入明文凭据
+- 如需让云端结果复用本地目录与统计名，请同步维护 `baidu_plant_mapping.json`
 
 
 4. 启动方式
@@ -76,6 +100,7 @@ bash scripts/run_real_pi.sh
 - 黑边优化默认已开启：`RECOGNIZER_SCREEN_FULLSCREEN=1` 与 `RECOGNIZER_SCREEN_FILL=1`
 - 如需手动旋转屏幕预览，可设置 `RECOGNIZER_PREVIEW_ROTATION=90/180/270`
 - 字体大小可通过 `RECOGNIZER_UI_SCALE` 调节（默认 1.25，建议范围 1.1~1.6）
+- real 模式下若云端失败，系统会在 `INFERENCING` 内自动回退本地模型
 
 
 5. 验收命令
@@ -86,11 +111,17 @@ bash scripts/run_real_pi.sh
 
 5.2 Phase 4（性能）
 
-python scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase4_real_runtime_report.json
+python scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --scenario all --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase4_real_runtime_report.json
 
 5.3 Phase 5（采样）
 
-python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase5_sampling_mode_report.json
+python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --scenario all --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase5_sampling_mode_report.json
+
+说明：
+- `--scenario all` 会顺序执行 `cloud_success`、`cloud_fallback`、`local_only` 三条确定性链路，并把结果汇总到 `scenario_results`
+- 如需单独排查某一路径，可改为 `--scenario cloud_success`、`--scenario cloud_fallback` 或 `--scenario local_only`
+- 上述脚本中的 `cloud_success` / `cloud_fallback` 为确定性验收场景，不等价于真实百度云连通性证明；真实网络与凭据联调应通过主程序 real 模式手测补充
+- Phase 5 自动化主要验证状态流、录制计数与统计页数据；screen 后端图片页与 `MAP_STATS` 的可视确认建议补一轮手测
 
 5.4 Phase 6（收口检查）
 
@@ -100,17 +131,19 @@ powershell -ExecutionPolicy Bypass -File scripts/phase6_release_check.ps1
 
 方式 A（逐条）：
 
-python3 scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase7_phase4_real_report.json
-python3 scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase7_phase5_real_report.json
+ python3 scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --scenario all --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase7_phase4_real_report.json
+ python3 scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --scenario all --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase7_phase5_real_report.json
 
 方式 B（一键）：
 
 bash scripts/phase7_real_signoff_pi.sh
 
 通过判据：
-- Phase4：reports/phase7_phase4_real_report.json 的 pass.overall=true
-- Phase5：reports/phase7_phase5_real_report.json 的 pass.overall=true
+- Phase4：reports/phase7_phase4_real_report.json 的 `pass.cloud_success=true`、`pass.cloud_fallback=true`、`pass.local_only=true`、`pass.overall=true`
+- Phase5：reports/phase7_phase5_real_report.json 的 `pass.cloud_success=true`、`pass.cloud_fallback=true`、`pass.local_only=true`、`pass.overall=true`
+- 如需定位具体失败链路，查看对应报告的 `scenario_results.<scenario>`
 - 总签收：Phase4 overall=true 且 Phase5 overall=true
+- 真实百度云连通性、screen 图片页与 `MAP_STATS` 导航需额外手测一次
 - 详细清单见：docs/phase7_实机签收清单.txt
 
 
@@ -137,5 +170,8 @@ bash scripts/phase7_real_signoff_pi.sh
 -----------
 - 交付时附带 reports/ 下最新 phase4/phase5 报告
 - Phase 7 实机签收时附带 phase7_phase4_real_report.json 与 phase7_phase5_real_report.json
+- 交付包同时附带 docs/v1.1_升级说明.txt，明确新增配置文件、环境变量与回滚注意事项
 - 记录目标设备型号、系统版本、Python 版本
+- 不要把百度 API 明文凭据写入仓库文件；交付时仅交接环境变量配置方式
+- 升级前备份 data/sampling_records.json 与本地配置覆盖项
 - 保留 docs/已知问题清单.txt 便于后续迭代

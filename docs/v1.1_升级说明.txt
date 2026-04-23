@@ -1,0 +1,131 @@
+Plant Recognizer v1.1 升级说明
+================================
+
+适用范围
+--------
+本说明用于把现有 Recognizer v1.0 / Phase6 交付环境升级到 v1.1 最终口径。
+
+本次升级的核心变化如下：
+- 默认界面切换为中文
+- 识别策略切换为“云端优先，本地回退”
+- 采样模式新增地图级汇总统计 `MAP_STATS`
+- 地图页与区域页支持图片化选择
+- 交付验收改为三链路口径：`cloud_success`、`cloud_fallback`、`local_only`
+
+
+1. 升级前检查
+--------------
+升级前请先完成以下备份：
+- 备份 `data/sampling_records.json`
+- 备份本地定制过的 `config/system_config.json`、`config/sampling_config.json`
+- 记录当前运行解释器、树莓派系统版本和已安装依赖
+
+说明：
+- v1.1 继续使用 `data/sampling_records.json`，无需做结构迁移
+- 若升级后写入了未映射云端植物，统计中可能出现 `cloud:` 命名空间键；如需回退旧版，优先恢复升级前备份的数据文件
+
+
+2. 文件与配置变更
+------------------
+必须新增或同步的文件：
+- `config/cloud_config.json`
+- `config/baidu_plant_mapping.json`
+- `docs/v1.1_升级说明.txt`
+
+必须复核的现有文件：
+- `config/system_config.json`：确认 `recognition_strategy=cloud_first`
+- `config/sampling_config.json`：确认地图/区域中文名与缩略图路径可用
+- `config/labels.json`：确认 `display_name` 为中文显示名
+
+运行时数据保持不变：
+- `data/sampling_records.json` 仍按 `regions.<region_id>.records.<plant_key>` 组织
+
+
+3. 云端凭据与覆盖规则
+----------------------
+推荐交付方式：
+- 把真实凭据放在环境变量中
+- 版本库中的 `config/cloud_config.json` 只保留环境变量名、接口地址、超时与重试参数
+
+敏感凭据优先级固定为：
+1. `RECOGNIZER_BAIDU_API_KEY` / `RECOGNIZER_BAIDU_SECRET_KEY`
+2. `RECOGNIZER_BAIDU_API_KEY_ENV` / `RECOGNIZER_BAIDU_SECRET_KEY_ENV` 指定的环境变量名
+3. `config/cloud_config.json` 中的 `api_key_env` / `secret_key_env`
+
+非敏感云端覆盖项：
+- `RECOGNIZER_BAIDU_API_ENDPOINT`
+- `RECOGNIZER_BAIDU_TOKEN_ENDPOINT`
+- `RECOGNIZER_BAIDU_REQUEST_TIMEOUT_S`
+- `RECOGNIZER_BAIDU_RETRY_COUNT`
+- `RECOGNIZER_BAIDU_TOKEN_CACHE_FILE`
+
+说明：
+- 若希望云端中文名复用本地目录与统计排序，请同步维护 `config/baidu_plant_mapping.json`
+- 未命中映射的云端植物不会丢弃，而会生成稳定的 `cloud:` 统计键
+
+
+4. 依赖与部署步骤
+------------------
+Windows 开发机（mock）最小启动：
+
+.venv\Scripts\python.exe app\main.py --runtime mock --input keyboard --log-level INFO
+
+树莓派实机推荐依赖：
+
+sudo apt update
+sudo apt install -y python3-picamera2 python3-pygame python3-rpi.gpio
+python3 -m pip install --upgrade pip
+python3 -m pip install ai-edge-litert numpy pillow
+
+树莓派 real 模式最小启动：
+
+SDL_VIDEODRIVER=kmsdrm python3 app/main.py --runtime real --input gpio --ui-backend screen --log-level INFO
+
+说明：
+- 若使用 venv，请确保安装依赖和运行应用使用同一解释器
+- 若只做日志联调，可把 `--ui-backend` 改为 `text`
+
+
+5. 升级后验收
+--------------
+自动化验收建议顺序：
+
+1) Phase 4 三链路验收
+python scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --scenario all --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase4_real_runtime_report.json
+
+2) Phase 5 三链路验收
+python scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --scenario all --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase5_sampling_mode_report.json
+
+3) 一键实机签收
+bash scripts/phase7_real_signoff_pi.sh
+
+自动化通过标准：
+- Phase 4 报告中 `pass.cloud_success`、`pass.cloud_fallback`、`pass.local_only`、`pass.overall` 全为 `true`
+- Phase 5 报告中 `pass.cloud_success`、`pass.cloud_fallback`、`pass.local_only`、`pass.overall` 全为 `true`
+- 如需定位失败链路，查看 `scenario_results.<scenario>`
+
+重要说明：
+- `--scenario all` 是确定性链路验收，用于验证编排、预算和回退路径
+- 它不直接证明真实百度云连通性，因此交付前仍需补人工手测
+
+
+6. 交付前手测清单
+------------------
+请至少补做以下人工检查：
+- screen 后端地图页与区域页图片可正常显示，缩略图高亮切换正常
+- `MAP_SELECT + NAV_LONG_PRESS -> MAP_STATS`，并可返回地图页
+- `REGION_SELECT + NAV_LONG_PRESS -> STATS`，并可返回地图页
+- 在联网且配置凭据的 real 模式下完成 1 次真实识别
+- 断网后再次识别，确认系统仍能回退本地模型
+
+
+7. 回滚建议
+-----------
+若升级后需要回滚：
+- 优先恢复升级前备份的 `data/sampling_records.json`
+- 恢复升级前版本的 `config/system_config.json` 与 `config/sampling_config.json`
+- 清理本次新增的环境变量覆盖项
+
+注意：
+- 若 v1.1 已写入未映射云端植物，旧版环境未必能按新口径展示这些 `cloud:` 键
+- 因此回滚时不建议直接沿用升级后的统计文件

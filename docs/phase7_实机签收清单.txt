@@ -14,6 +14,8 @@ Phase 7 实机签收清单（Raspberry Pi）
 - Raspberry Pi
 - 摄像头可用
 - 模型文件存在：models/plant_classifier_int8.tflite
+- 已确认 `config/cloud_config.json` 与 `config/baidu_plant_mapping.json` 存在且内容为交付版本
+- 已准备真实百度凭据环境变量（如需要做联网手测）
 
 2) 依赖安装（使用运行时同一解释器）
 
@@ -28,39 +30,48 @@ python3 -m pip install ai-edge-litert numpy pillow
 方式 A：逐条执行
 
 1) Phase 4 real
-python3 scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase7_phase4_real_report.json
+python3 scripts/phase4_real_runtime_acceptance.py --runtime real --input keyboard --scenario all --samples 30 --warmup 5 --sleep-s 0.02 --output reports/phase7_phase4_real_report.json
 
 2) Phase 5 real
-python3 scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase7_phase5_real_report.json
+python3 scripts/phase5_sampling_mode_acceptance.py --runtime real --input keyboard --scenario all --cycles 20 --map-nav 1 --region-nav 2 --output reports/phase7_phase5_real_report.json
 
 方式 B：一键执行
 
 bash scripts/phase7_real_signoff_pi.sh
+
+方式 C：手测补充（screen + 真实网络）
+
+1) 启动主程序 real 模式，确认地图页与区域页图片可见
+2) 在联网状态完成 1 次识别，确认 real 模式可正常出结果
+3) 断网后再次识别，确认系统仍能回退本地模型
+4) 手动验证 `MAP_SELECT + NAV_LONG_PRESS -> MAP_STATS` 与返回路径
 
 
 通过判据
 --------
 1) Phase 4 通过判据
 - reports/phase7_phase4_real_report.json 中：
-  - pass.capture_p95 = true
-  - pass.infer_p95 = true
-  - pass.full_flow_p95 = true
+  - pass.cloud_success = true
+  - pass.cloud_fallback = true
+  - pass.local_only = true
   - pass.overall = true
+  - 如需定位失败原因，查看 scenario_results.<scenario>.pass 与 metrics
 
 2) Phase 5 通过判据
 - reports/phase7_phase5_real_report.json 中：
-  - pass.state_flow_completed = true
-  - pass.recognized_exists = true
-  - pass.recording_path_seen = true
-  - pass.stats_has_items = true
+  - pass.cloud_success = true
+  - pass.cloud_fallback = true
+  - pass.local_only = true
   - pass.overall = true
 - 建议同时满足：
   - sampling.recognized_count > 0
   - sampling.recorded_delta_count > 0
   - stats.items_count > 0
+  - scenario_results.<scenario>.pass.expected_path = true
 
 3) 总签收判据
 - Phase 4 overall=true 且 Phase 5 overall=true
+- screen 图片页、`MAP_STATS` 导航与真实联网/断网手测已完成
 
 
 失败处置

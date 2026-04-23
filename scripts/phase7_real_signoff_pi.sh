@@ -54,28 +54,59 @@ phase5_pass = bool(phase5.get("pass", {}).get("overall", False))
 print("[Phase7-Real] Phase4 overall:", phase4_pass)
 print("[Phase7-Real] Phase5 overall:", phase5_pass)
 
-print(
-    "[Phase7-Real] Phase4 p95/budget:",
-    "capture=%.4fs/%.4fs" % (
-        float(phase4["metrics"]["capture_s"]["p95_s"]),
-        float(phase4["budget_s"]["capture_s"]),
-    ),
-    "infer=%.4fs/%.4fs" % (
-        float(phase4["metrics"]["infer_s"]["p95_s"]),
-        float(phase4["budget_s"]["infer_s"]),
-    ),
-    "full=%.4fs/%.4fs" % (
-        float(phase4["metrics"]["full_flow_s"]["p95_s"]),
-        float(phase4["budget_s"]["full_flow_s"]),
-    ),
-)
+phase4_scenarios = phase4.get("scenario_results") or {}
+if phase4_scenarios:
+    for scenario_name, scenario_report in phase4_scenarios.items():
+        metrics = scenario_report["metrics"]
+        budgets = scenario_report["budget_s"]
+        print(
+            f"[Phase7-Real] Phase4 {scenario_name} p95/budget:",
+            "capture=%.4fs/%.4fs" % (
+                float(metrics["capture_s"]["p95_s"]),
+                float(budgets["capture_s"]),
+            ),
+            "infer=%.4fs/%.4fs" % (
+                float(metrics["infer_s"]["p95_s"]),
+                float(budgets["infer_s"]),
+            ),
+            "full=%.4fs/%.4fs" % (
+                float(metrics["full_flow_s"]["p95_s"]),
+                float(budgets["full_flow_s"]),
+            ),
+        )
+else:
+    print(
+        "[Phase7-Real] Phase4 p95/budget:",
+        "capture=%.4fs/%.4fs" % (
+            float(phase4["metrics"]["capture_s"]["p95_s"]),
+            float(phase4["budget_s"]["capture_s"]),
+        ),
+        "infer=%.4fs/%.4fs" % (
+            float(phase4["metrics"]["infer_s"]["p95_s"]),
+            float(phase4["budget_s"]["infer_s"]),
+        ),
+        "full=%.4fs/%.4fs" % (
+            float(phase4["metrics"]["full_flow_s"]["p95_s"]),
+            float(phase4["budget_s"]["full_flow_s"]),
+        ),
+    )
 
-print(
-    "[Phase7-Real] Phase5 counters:",
-    "recognized_count=%s" % phase5["sampling"]["recognized_count"],
-    "recorded_delta_count=%s" % phase5["sampling"]["recorded_delta_count"],
-    "stats_items_count=%s" % phase5["stats"]["items_count"],
-)
+phase5_scenarios = phase5.get("scenario_results") or {}
+if phase5_scenarios:
+    for scenario_name, scenario_report in phase5_scenarios.items():
+        print(
+            f"[Phase7-Real] Phase5 {scenario_name} counters:",
+            "recognized_count=%s" % scenario_report["sampling"]["recognized_count"],
+            "recorded_delta_count=%s" % scenario_report["sampling"]["recorded_delta_count"],
+            "stats_items_count=%s" % scenario_report["stats"]["items_count"],
+        )
+else:
+    print(
+        "[Phase7-Real] Phase5 counters:",
+        "recognized_count=%s" % phase5["sampling"]["recognized_count"],
+        "recorded_delta_count=%s" % phase5["sampling"]["recorded_delta_count"],
+        "stats_items_count=%s" % phase5["stats"]["items_count"],
+    )
 
 if not (phase4_pass and phase5_pass):
     raise SystemExit(1)

@@ -1,6 +1,7 @@
 {
   "version": "1.1.0",
   "baidu_api_endpoint": "https://aip.baidubce.com/rest/2.0/image-classify/v1/plant",
+  "baidu_token_endpoint": "https://aip.baidubce.com/oauth/2.0/token",
   "api_key_env": "BAIDU_API_KEY",
   "secret_key_env": "BAIDU_SECRET_KEY",
   "token_cache_file": "data/.baidu_token_cache.json",
