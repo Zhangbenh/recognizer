@@ -47,6 +47,9 @@ class SystemConfigRepository:
 	def cloud_recognition_threshold(self) -> float:
 		return float(self.get("cloud_recognition_threshold", self.recognition_threshold()))
 
+	def boot_splash_duration_s(self) -> float:
+		return float(self.get("boot_splash_duration_s", 3.0))
+
 	def display_timeout_s(self) -> float:
 		return float(self.get("display_timeout_s", 5.0))
 
@@ -57,7 +60,7 @@ class SystemConfigRepository:
 		return float(self.get("record_timeout_s", 1.0))
 
 	def capture_debounce_ms(self) -> int:
-		return int(self.get("capture_debounce_ms", 300))
+		return int(self.get("capture_debounce_ms", 100))
 
 	def long_press_threshold_ms(self) -> int:
 		return int(self.get("long_press_threshold_ms", 800))

@@ -37,6 +37,7 @@ class PygameScreenRenderer:
 		self._crosshair_color = (40, 240, 120)
 		self._bg_color = (12, 16, 22)
 		self._panel_bg = (0, 0, 0, 160)
+		self._startup_screen_path = self._resolve_startup_screen_path()
 
 		self._init_pygame()
 
@@ -178,8 +179,7 @@ class PygameScreenRenderer:
 			screen.blit(frame_surface, (offset_x, offset_y))
 
 		if state == State.BOOTING:
-			self._draw_centered_text("植物识别系统", y=self._height // 2 - self._scaled_px(28), size="large")
-			self._draw_centered_text("启动中...", y=self._height // 2 + self._scaled_px(8))
+			self._draw_startup_screen()
 		elif state == State.HOME:
 			self._draw_menu(view_model=view_model)
 		elif state == State.MAP_SELECT:
@@ -316,6 +316,35 @@ class PygameScreenRenderer:
 			max(1, int(math.ceil(surface_height * scale))),
 		)
 		return pygame.transform.smoothscale(surface, target_size)
+
+	def _resolve_startup_screen_path(self) -> Path:
+		assets_path = self._repo_root / "assets" / "startup" / "startup_screen.png"
+		if assets_path.exists():
+			return assets_path
+		root_path = self._repo_root / "startup_screen.png"
+		if root_path.exists():
+			return root_path
+		return assets_path
+
+	def _draw_startup_screen(self) -> None:
+		pygame = self._pygame
+		screen = self._screen
+		if pygame is None or screen is None:
+			return
+
+		surface = self._get_media_surface(
+			self._startup_screen_path,
+			label="startup-screen",
+			width=max(1, self._width),
+			height=max(1, self._height),
+			cover=True,
+		)
+		if surface is not None:
+			screen.blit(surface, (0, 0))
+			return
+
+		self._draw_centered_text("植物识别系统", y=self._height // 2 - self._scaled_px(28), size="large")
+		self._draw_centered_text("启动中...", y=self._height // 2 + self._scaled_px(8))
 
 	def _draw_menu(self, *, view_model: dict[str, Any]) -> None:
 		selected = str(view_model.get("selected_home_option") or "normal")

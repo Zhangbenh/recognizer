@@ -71,6 +71,7 @@ class AppController:
 		release_gate_service: object | None = None,
 		logger: Optional[logging.Logger] = None,
 		max_events_per_tick: int = 64,
+		boot_splash_duration_s: float = 0.0,
 	) -> None:
 		self._state_machine = state_machine
 		self._input_adapter = input_adapter
@@ -81,12 +82,17 @@ class AppController:
 		self._release_gate_service = release_gate_service
 		self._logger = logger or logging.getLogger("recognizer.controller")
 		self._max_events_per_tick = max(1, int(max_events_per_tick))
+		self._boot_splash_duration_s = max(0.0, float(boot_splash_duration_s))
 		self._running = False
 
 	def run(self, *, max_ticks: Optional[int] = None, idle_sleep_s: float = 0.02) -> None:
 		tick_count = 0
 		self._running = True
 		self._state_machine.start()
+		if self._state_machine.current_state == State.BOOTING:
+			self._renderer.render(self._state_machine.current_state, self._state_machine.context)
+			if self._renderer.needs_live_preview_frames and self._boot_splash_duration_s > 0:
+				time.sleep(self._boot_splash_duration_s)
 
 		try:
 			while self._running:
@@ -509,5 +515,6 @@ def build_app_controller(
 		recognition_service=recognition_service,
 		release_gate_service=release_gate_service,
 		logger=logger,
+		boot_splash_duration_s=system_config_repository.boot_splash_duration_s(),
 	)
 
