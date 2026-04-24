@@ -73,12 +73,16 @@ class _ModelManifestRepoStub:
 
 
 class _SystemConfigRepoStub:
-	def __init__(self, *, strategy: str = "cloud_first", threshold: float = 0.6) -> None:
+	def __init__(self, *, strategy: str = "cloud_first", threshold: float = 0.6, cloud_threshold: float | None = None) -> None:
 		self._strategy = strategy
 		self._threshold = threshold
+		self._cloud_threshold = threshold if cloud_threshold is None else cloud_threshold
 
 	def recognition_threshold(self) -> float:
 		return self._threshold
+
+	def cloud_recognition_threshold(self) -> float:
+		return self._cloud_threshold
 
 	def recognition_strategy(self) -> str:
 		return self._strategy
@@ -110,6 +114,8 @@ def _build_service(
 	inference_output: InferenceOutput,
 	cloud_response: BaiduPlantResponse | Exception,
 	mappings: dict[str, str] | None = None,
+	local_threshold: float = 0.6,
+	cloud_threshold: float | None = None,
 ) -> tuple[RecognitionService, _InferenceStub, _CloudClientStub]:
 	model_path = tmp_path / "model.tflite"
 	model_path.write_bytes(b"fake-model")
@@ -120,7 +126,7 @@ def _build_service(
 		inference_adapter=inference,
 		label_repository=_LabelRepoStub(),
 		model_manifest_repository=_ModelManifestRepoStub(model_path),
-		system_config_repository=_SystemConfigRepoStub(),
+		system_config_repository=_SystemConfigRepoStub(threshold=local_threshold, cloud_threshold=cloud_threshold),
 		baidu_plant_client=cloud_client,
 		baidu_mapping_repository=_MappingRepoStub(mappings),
 		frame_encoder=lambda frame: b"encoded-frame:" + str(frame).encode("utf-8"),
@@ -190,6 +196,35 @@ def test_recognition_service_generates_cloud_extension_key_and_recorder_persists
 	assert records["cloud:野花"]["display_name"] == "野花"
 	assert records["cloud:野花"]["plant_name"] == "野花"
 	assert records["cloud:野花"]["count"] == 1
+
+
+def test_recognition_service_uses_cloud_specific_threshold_before_local(tmp_path: Path) -> None:
+	service, inference, cloud_client = _build_service(
+		tmp_path=tmp_path,
+		inference_output=InferenceOutput(class_id=18, confidence=0.91, top3=[(18, 0.91)]),
+		cloud_response=BaiduPlantResponse(
+			log_id=3,
+			candidates=[BaiduPlantCandidate(name="香蕉", score=0.556)],
+			raw_payload={"result": [{"name": "香蕉", "score": 0.556}]},
+		),
+		mappings={"香蕉": "banana"},
+		local_threshold=0.6,
+		cloud_threshold=0.5,
+	)
+
+	result = service.recognize({"frame": "cloud-threshold"})
+
+	assert result.is_recognized is True
+	assert result.source == "cloud"
+	assert result.fallback_used is False
+	assert result.class_id == 1
+	assert result.plant_key == "banana"
+	assert result.display_name == "香蕉"
+	assert result.confidence == pytest.approx(0.556)
+	assert service.threshold == pytest.approx(0.6)
+	assert service.cloud_threshold == pytest.approx(0.5)
+	assert inference.infer_calls == 0
+	assert len(cloud_client.calls) == 1
 
 
 def test_recognition_service_falls_back_to_local_when_cloud_fails(tmp_path: Path) -> None:

@@ -52,6 +52,7 @@ class RecognitionService:
 		self._logger = logger or logging.getLogger("recognizer.domain.recognition")
 
 		self._threshold = 0.6
+		self._cloud_threshold = 0.6
 		self._label_index: dict[int, dict[str, Any]] = {}
 		self._label_by_plant_key: dict[str, dict[str, Any]] = {}
 		self._booted = False
@@ -64,8 +65,13 @@ class RecognitionService:
 	def threshold(self) -> float:
 		return self._threshold
 
+	@property
+	def cloud_threshold(self) -> float:
+		return self._cloud_threshold
+
 	def boot(self) -> None:
 		self._threshold = self._system_config_repository.recognition_threshold()
+		self._cloud_threshold = self._system_config_repository.cloud_recognition_threshold()
 		self._label_index = self._label_repository.index_map()
 		if not self._label_index:
 			raise LabelError("labels are empty", retryable=False)
@@ -78,7 +84,12 @@ class RecognitionService:
 		self._load_model(model_path)
 		self._start_camera()
 		self._booted = True
-		self._logger.info("recognition service booted: model=%s threshold=%.3f", model_path, self._threshold)
+		self._logger.info(
+			"recognition service booted: model=%s local_threshold=%.3f cloud_threshold=%.3f",
+			model_path,
+			self._threshold,
+			self._cloud_threshold,
+		)
 
 	def shutdown(self) -> None:
 		self._booted = False
@@ -217,12 +228,12 @@ class RecognitionService:
 			return None
 
 		candidate = max(response.candidates, key=lambda item: item.score)
-		if not is_recognized(candidate.score, self._threshold):
+		if not is_recognized(candidate.score, self._cloud_threshold):
 			self._logger.info(
 				"cloud candidate below threshold, fallback to local: name=%s score=%.4f threshold=%.4f",
 				candidate.name,
 				candidate.score,
-				self._threshold,
+				self._cloud_threshold,
 			)
 			return None
 

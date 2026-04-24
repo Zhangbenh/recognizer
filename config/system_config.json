@@ -3,6 +3,7 @@
   "ui_language": "zh-CN",
   "recognition_strategy": "cloud_first",
   "recognition_threshold": 0.6,
+  "cloud_recognition_threshold": 0.5,
   "display_timeout_s": 5.0,
   "cloud_request_timeout_s": 3.0,
   "local_infer_timeout_s": 1.5,

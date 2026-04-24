@@ -44,6 +44,9 @@ class SystemConfigRepository:
 	def recognition_threshold(self) -> float:
 		return float(self.get("recognition_threshold", 0.6))
 
+	def cloud_recognition_threshold(self) -> float:
+		return float(self.get("cloud_recognition_threshold", self.recognition_threshold()))
+
 	def display_timeout_s(self) -> float:
 		return float(self.get("display_timeout_s", 5.0))
 

@@ -103,6 +103,7 @@ def test_config_repositories_contracts_and_release_gate() -> None:
 	assert system_repo.recognition_strategy() == "cloud_first"
 	assert system_repo.cloud_request_timeout_s() == 3.0
 	assert system_repo.local_infer_timeout_s() == 1.5
+	assert system_repo.cloud_recognition_threshold() == 0.5
 	assert system_repo.get("ui_language") == "zh-CN"
 	assert system_repo.get("recognition_strategy") == "cloud_first"
 	assert system_repo.get("cloud_request_timeout_s") == 3.0
