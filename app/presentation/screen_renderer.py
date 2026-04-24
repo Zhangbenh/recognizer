@@ -849,12 +849,6 @@ class PygameScreenRenderer:
 					(self._scaled_px(12), items_start_y + (index - 1) * row_h),
 				)
 
-		hint_label = meta_font.render(str(view_model.get("hint") or ""), True, (236, 236, 236))
-		screen.blit(
-			hint_label,
-			(self._scaled_px(8), self._height - hint_label.get_height() - self._scaled_px(6)),
-		)
-
 	def _draw_map_stats_panel(self, *, view_model: dict[str, Any]) -> None:
 		pygame = self._pygame
 		screen = self._screen
@@ -927,12 +921,6 @@ class PygameScreenRenderer:
 				line = f"{index}. {name}  x{total_count}  区域{covered}"
 				self._blit_text(line, font=item_font, x=text_x, y=items_start_y + (index - 1) * row_h)
 
-		hint_label = meta_font.render(str(view_model.get("hint") or ""), True, (236, 236, 236))
-		screen.blit(
-			hint_label,
-			(self._scaled_px(8), self._height - hint_label.get_height() - self._scaled_px(6)),
-		)
-
 	def _draw_error_panel(self, *, view_model: dict[str, Any]) -> None:
 		pygame = self._pygame
 		screen = self._screen
@@ -952,12 +940,6 @@ class PygameScreenRenderer:
 		screen.blit(
 			body_font.render(str(error_message), True, (255, 210, 210)),
 			(self._scaled_px(16), error_y + head_font.get_height() + self._scaled_px(10)),
-		)
-		action = "CONFIRM：重试" if retryable else "CONFIRM：忽略"
-		action_label = body_font.render(action, True, (255, 255, 255))
-		screen.blit(
-			action_label,
-			(self._scaled_px(16), self._height - action_label.get_height() - self._scaled_px(10)),
 		)
 
 	def _draw_crosshair(self) -> None:
@@ -1003,32 +985,7 @@ class PygameScreenRenderer:
 		screen.blit(label, (rect.x + pad_x, rect.y + pad_y))
 
 	def _draw_hint(self, hint: Any) -> None:
-		if not hint:
-			return
-
-		pygame = self._pygame
-		screen = self._screen
-		font = self._font_small
-		if pygame is None or screen is None or font is None:
-			return
-
-		lines = self._hint_lines(hint, max_lines=2)
-		if not lines:
-			return
-
-		pad_x = self._scaled_px(10)
-		pad_y = self._scaled_px(6)
-		spacing = self._scaled_px(2)
-		line_h = font.get_height()
-		panel_h = pad_y * 2 + len(lines) * line_h + max(0, len(lines) - 1) * spacing
-		panel = pygame.Surface((self._width - self._scaled_px(12), panel_h), pygame.SRCALPHA)
-		panel.fill((0, 0, 0, 140))
-		panel_y = self._height - panel_h - self._scaled_px(6)
-		screen.blit(panel, (self._scaled_px(6), panel_y))
-
-		for index, line in enumerate(lines):
-			label = font.render(str(line), True, (236, 236, 236))
-			screen.blit(label, (self._scaled_px(6) + pad_x, panel_y + pad_y + index * (line_h + spacing)))
+		return
 
 	def _draw_centered_text(self, text: str, *, y: int, size: str = "medium") -> None:
 		pygame = self._pygame
