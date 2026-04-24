@@ -21,6 +21,7 @@ class DisplayPage:
 			lines.append(f"  置信度: {confidence:.4f}")
 		else:
 			lines.append(f"  置信度: {confidence}")
+		lines.append(f"  识别来源: {view_model.get('source_display_name')}")
 
 		lines.append(f"  提示: {view_model.get('hint')}")
 
@@ -33,5 +34,6 @@ class DisplayPage:
 		lines.append("  状态: 正在写入统计...")
 		lines.append(f"  区域: {view_model.get('selected_region_id')}")
 		lines.append(f"  显示名称: {view_model.get('display_name')}")
+		lines.append(f"  识别来源: {view_model.get('source_display_name')}")
 		return lines
 

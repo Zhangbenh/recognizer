@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 import os
+import struct
 import time
+import importlib
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -309,7 +310,7 @@ def _default_camera_options() -> dict[str, Any]:
 	return {
 		"width": _env_int("RECOGNIZER_CAMERA_WIDTH", 800 if portrait_layout else 480),
 		"height": _env_int("RECOGNIZER_CAMERA_HEIGHT", 480 if portrait_layout else 320),
-		"rotation": _env_int("RECOGNIZER_CAMERA_ROTATION", 90 if portrait_layout else 180),
+		"rotation": _env_int("RECOGNIZER_CAMERA_ROTATION", 270 if portrait_layout else 180),
 		"swap_red_blue": _env_bool("RECOGNIZER_CAMERA_SWAP_RED_BLUE", True),
 		"warmup_seconds": _env_float("RECOGNIZER_CAMERA_WARMUP_S", 0.5),
 	}
@@ -343,8 +344,8 @@ def _encode_frame_for_cloud(frame: Any) -> bytes:
 		return json.dumps(frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
 
 	try:
-		import numpy as np
-	except ImportError:
+		np = importlib.import_module("numpy")
+	except Exception:
 		np = None
 
 	if np is not None and isinstance(frame, np.ndarray):
@@ -353,20 +354,47 @@ def _encode_frame_for_cloud(frame: Any) -> bytes:
 			array = array[0]
 		if array.ndim != 3 or array.shape[2] != 3:
 			raise ValueError("cloud frame encoder expects RGB image shape (H, W, 3)")
-
-		try:
-			from PIL import Image
-		except ImportError as exc:
-			raise RuntimeError(
-				"Pillow is required for cloud frame encoding from numpy arrays."
-			) from exc
-
-		buffer = io.BytesIO()
-		image = Image.fromarray(array.astype("uint8", copy=False), mode="RGB")
-		image.save(buffer, format="PNG")
-		return buffer.getvalue()
+		return _encode_rgb_array_to_bmp_bytes(array)
 
 	raise TypeError(f"unsupported frame type for cloud encoding: {type(frame).__name__}")
+
+
+def _encode_rgb_array_to_bmp_bytes(array: Any) -> bytes:
+	rgb = array.astype("uint8", copy=False)
+	if rgb.ndim != 3 or rgb.shape[2] != 3:
+		raise ValueError("cloud bmp encoder expects RGB image shape (H, W, 3)")
+
+	height, width, _channels = rgb.shape
+	row_stride = ((width * 3 + 3) // 4) * 4
+	padding = row_stride - width * 3
+	padding_bytes = b"\x00" * padding
+	rows: list[bytes] = []
+	for row in rgb[::-1]:
+		bgr_row = row[:, [2, 1, 0]].tobytes()
+		rows.append(bgr_row + padding_bytes)
+	pixel_data = b"".join(rows)
+
+	file_header_size = 14
+	info_header_size = 40
+	pixel_offset = file_header_size + info_header_size
+	file_size = pixel_offset + len(pixel_data)
+
+	file_header = b"BM" + struct.pack("<IHHI", file_size, 0, 0, pixel_offset)
+	info_header = struct.pack(
+		"<IIIHHIIIIII",
+		info_header_size,
+		width,
+		height,
+		1,
+		24,
+		0,
+		len(pixel_data),
+		2835,
+		2835,
+		0,
+		0,
+	)
+	return file_header + info_header + pixel_data
 
 
 def _build_input_adapter(*, input_backend: str, system_config: SystemConfigRepository):

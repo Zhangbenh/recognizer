@@ -539,23 +539,58 @@ class PygameScreenRenderer:
 
 		surface = pygame.Surface((width, height))
 		asset_path = self._resolve_asset_path(thumbnail_path)
-		if asset_path and asset_path.exists():
-			try:
-				loaded = pygame.image.load(str(asset_path))
-				if loaded.get_alpha() is not None:
-					loaded = loaded.convert_alpha()
-				else:
-					loaded = loaded.convert()
-				fitted = self._fit_surface_to_box(loaded, width=width, height=height, cover=cover)
-				surface.fill((16, 20, 26))
-				surface.blit(fitted, fitted.get_rect(center=(width // 2, height // 2)))
-			except Exception:
-				surface = self._build_placeholder_surface(width=width, height=height, label=label)
+		loaded = self._load_media_surface(asset_path)
+		if loaded is not None:
+			fitted = self._fit_surface_to_box(loaded, width=width, height=height, cover=cover)
+			surface.fill((16, 20, 26))
+			surface.blit(fitted, fitted.get_rect(center=(width // 2, height // 2)))
 		else:
 			surface = self._build_placeholder_surface(width=width, height=height, label=label)
 
 		self._image_cache[cache_key] = surface
 		return surface
+
+	def _load_media_surface(self, asset_path: Path | None):
+		pygame = self._pygame
+		if pygame is None or asset_path is None:
+			return None
+
+		for candidate in self._candidate_media_paths(asset_path):
+			if not candidate.exists():
+				continue
+			try:
+				loaded = pygame.image.load(str(candidate))
+				return loaded.convert_alpha() if loaded.get_alpha() is not None else loaded.convert()
+			except Exception as exc:
+				fallback = self._load_media_surface_via_pillow(candidate)
+				if fallback is not None:
+					return fallback
+				self._log_info("screen asset load failed: path=%s reason=%s", candidate, exc)
+		return None
+
+	def _candidate_media_paths(self, asset_path: Path) -> list[Path]:
+		candidates = [asset_path]
+		if asset_path.suffix.lower() == ".png":
+			bmp_candidate = asset_path.with_suffix(".bmp")
+			if bmp_candidate != asset_path:
+				candidates.append(bmp_candidate)
+		return candidates
+
+	def _load_media_surface_via_pillow(self, asset_path: Path):
+		pygame = self._pygame
+		if pygame is None:
+			return None
+		try:
+			from PIL import Image
+		except ImportError:
+			return None
+
+		try:
+			with Image.open(asset_path) as image:
+				rgba = image.convert("RGBA")
+				return pygame.image.fromstring(rgba.tobytes(), rgba.size, "RGBA")
+		except Exception:
+			return None
 
 	def _build_placeholder_surface(self, *, width: int, height: int, label: str):
 		pygame = self._pygame
@@ -681,17 +716,23 @@ class PygameScreenRenderer:
 			confidence_text = f"{confidence * 100:.1f}%"
 		else:
 			confidence_text = "--"
+		source_text = str(view_model.get("source_display_name") or "未知")
 
 		header = "记录中" if recording else "识别结果"
 		line_top = panel_y + self._scaled_px(12)
 		line_gap = self._scaled_px(10)
 		line2 = line_top + header_font.get_height() + line_gap
 		line3 = line2 + name_font.get_height() + line_gap
+		line4 = line3 + meta_font.get_height() + self._scaled_px(4)
 		screen.blit(header_font.render(header, True, (200, 220, 255)), (panel_x + self._scaled_px(12), line_top))
 		screen.blit(name_font.render(str(name), True, (255, 255, 255)), (panel_x + self._scaled_px(12), line2))
 		screen.blit(
 			meta_font.render(f"置信度: {confidence_text}", True, (220, 220, 220)),
 			(panel_x + self._scaled_px(12), line3),
+		)
+		screen.blit(
+			meta_font.render(f"来源: {source_text}", True, (220, 220, 220)),
+			(panel_x + self._scaled_px(12), line4),
 		)
 
 		hint = "正在写入统计..." if recording else (view_model.get("hint") or "")

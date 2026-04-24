@@ -3,6 +3,12 @@ from __future__ import annotations
 import json
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
+np = pytest.importorskip("numpy")
+
+from controller.app_controller import _encode_frame_for_cloud
+
 from infrastructure.cloud.baidu_plant_client import BaiduPlantClient, HttpResponse
 from infrastructure.cloud.token_cache import BaiduTokenCache
 from infrastructure.config.cloud_config_repository import CloudConfigRepository
@@ -153,3 +159,18 @@ def test_baidu_client_uses_token_cache_and_builds_form_request(tmp_path, monkeyp
 	cache = BaiduTokenCache(cache_path, clock=lambda: 1000.0)
 	assert cache.get_valid() is not None
 	assert cache.get_valid().access_token == "token-123"
+
+
+def test_cloud_frame_encoder_supports_numpy_without_pillow_dependency() -> None:
+	frame = np.array(
+		[
+			[[255, 0, 0], [0, 255, 0]],
+			[[0, 0, 255], [255, 255, 255]],
+		],
+		dtype=np.uint8,
+	)
+
+	encoded = _encode_frame_for_cloud(frame)
+
+	assert encoded[:2] == b"BM"
+	assert len(encoded) > 54
