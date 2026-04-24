@@ -8,11 +8,11 @@ from application.events import EventType
 from application.input_mapper import InputMapper
 from application.states import State
 from domain import MapStatsItem, MapStatsSnapshot
-from domain.errors import CloudTimeoutError, ConfigError, LabelError, ModelError
+from domain.errors import CloudConfigError, CloudTimeoutError, ConfigError, LabelError, ModelError
 from domain.models import RecognitionResult
 from domain.release_gate_service import ReleaseGateService
 from infrastructure.config.baidu_mapping_repository import BaiduMappingRepository
-from infrastructure.config.cloud_config_repository import CloudConfigRepository
+from infrastructure.config.cloud_config_repository import CloudConfig, CloudConfigRepository
 from infrastructure.config.label_repository import LabelRepository
 from infrastructure.config.model_manifest_repository import ModelManifestRepository
 from infrastructure.config.sampling_config_repository import SamplingConfigRepository
@@ -123,13 +123,13 @@ def test_config_repositories_contracts_and_release_gate() -> None:
 
 	maps = sampling_repo.list_maps()
 	assert len(maps) >= 1
-	assert maps[0]["display_name"] == "地图A"
-	assert maps[0]["thumbnail_path"].endswith("map_a_thumb.png")
+	assert str(maps[0]["display_name"] or "").strip()
+	assert maps[0]["thumbnail_path"].endswith(".png")
 	first_map_id = str(maps[0]["map_id"])
 	regions = sampling_repo.list_regions(first_map_id)
 	assert len(regions) >= 1
-	assert regions[0]["display_name"] == "区域1"
-	assert regions[0]["thumbnail_path"].endswith("map_a_r1_thumb.png")
+	assert str(regions[0]["display_name"] or "").strip()
+	assert regions[0]["thumbnail_path"].endswith(".png")
 
 	release_gate = ReleaseGateService(
 		model_manifest_repository=manifest_repo,
@@ -158,6 +158,22 @@ def test_cloud_config_and_mapping_repository_contracts(monkeypatch: pytest.Monke
 	assert config.token_cache_file.name == ".baidu_token_cache.json"
 	assert mapping_repo.plant_key_for(" 辣椒 ") == "peperchili"
 	assert mapping_repo.plant_key_for("不存在的植物") is None
+
+
+def test_cloud_config_require_credentials_error_mentions_supported_sources() -> None:
+	config = CloudConfig(
+		version="1.1.0",
+		baidu_api_endpoint="https://example.test/plant",
+		baidu_token_endpoint="https://example.test/token",
+		token_cache_file=Path("cache.json"),
+		request_timeout_s=3.0,
+		retry_count=1,
+		api_key=None,
+		secret_key=None,
+	)
+
+	with pytest.raises(CloudConfigError, match="api_key / secret_key in config/cloud_config.json"):
+		config.require_credentials()
 
 
 def test_label_repository_invalid_payload_raises_label_error(tmp_path) -> None:

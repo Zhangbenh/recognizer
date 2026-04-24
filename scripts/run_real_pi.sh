@@ -4,6 +4,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+LOCAL_ENV_FILE="$REPO_ROOT/.env.real.local"
+if [ -f "$LOCAL_ENV_FILE" ]; then
+	set -a
+	# Load Pi-local secrets without requiring manual export each run.
+	. "$LOCAL_ENV_FILE"
+	set +a
+fi
+
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 INPUT_BACKEND="${INPUT_BACKEND:-gpio}"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"

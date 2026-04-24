@@ -72,6 +72,8 @@ def test_cloud_config_repository_prefers_direct_env_then_named_env_over_config(t
 			{
 				"version": "1.1.0",
 				"baidu_api_endpoint": "https://plant.example.test/rest/2.0/image-classify/v1/plant",
+				"api_key": "literal-api-key",
+				"secret_key": "literal-secret-key",
 				"api_key_env": "CONFIG_API_KEY",
 				"secret_key_env": "CONFIG_SECRET_KEY",
 				"token_cache_file": "data/cache.json",
@@ -104,6 +106,36 @@ def test_cloud_config_repository_prefers_direct_env_then_named_env_over_config(t
 	assert config.retry_count == 2
 	assert config.baidu_token_endpoint == "https://aip.baidubce.com/oauth/2.0/token"
 	assert config.token_cache_file == (tmp_path / "data" / "cache.json").resolve()
+
+
+def test_cloud_config_repository_falls_back_to_literal_credentials(tmp_path) -> None:
+	config_path = tmp_path / "cloud_config.json"
+	config_path.write_text(
+		json.dumps(
+			{
+				"version": "1.1.0",
+				"baidu_api_endpoint": "https://plant.example.test/rest/2.0/image-classify/v1/plant",
+				"baidu_token_endpoint": "https://oauth.example.test/oauth/2.0/token",
+				"api_key": "literal-api-key",
+				"secret_key": "literal-secret-key",
+				"api_key_env": "BAIDU_API_KEY",
+				"secret_key_env": "BAIDU_SECRET_KEY",
+				"token_cache_file": "data/cache.json",
+				"request_timeout_s": 3.0,
+				"retry_count": 1,
+			},
+			ensure_ascii=False,
+		),
+		encoding="utf-8",
+	)
+
+	repo = CloudConfigRepository(file_path=str(config_path), environ={})
+	config = repo.load()
+
+	assert config.api_key == "literal-api-key"
+	assert config.secret_key == "literal-secret-key"
+	assert config.api_key_env_name == "cloud_config.json:api_key"
+	assert config.secret_key_env_name == "cloud_config.json:secret_key"
 
 
 def test_baidu_client_uses_token_cache_and_builds_form_request(tmp_path, monkeypatch) -> None:
