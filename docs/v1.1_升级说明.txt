@@ -47,6 +47,12 @@ Plant Recognizer v1.1 升级说明
 - 把真实凭据放在环境变量中
 - 版本库中的 `config/cloud_config.json` 只保留环境变量名、接口地址、超时与重试参数
 
+树莓派最稳执行方案：
+- 在仓库根目录创建仅本机使用的 `.env.real.local`
+- 文件中写入 `RECOGNIZER_BAIDU_API_KEY=...` 与 `RECOGNIZER_BAIDU_SECRET_KEY=...`
+- 通过 `scripts/run_real_pi.sh` 启动，脚本会自动加载该文件并导出环境变量
+- `.env.real.local` 已被 `.gitignore` 忽略，避免误提交真实密钥
+
 敏感凭据优先级固定为：
 1. `RECOGNIZER_BAIDU_API_KEY` / `RECOGNIZER_BAIDU_SECRET_KEY`
 2. `RECOGNIZER_BAIDU_API_KEY_ENV` / `RECOGNIZER_BAIDU_SECRET_KEY_ENV` 指定的环境变量名
@@ -80,6 +86,11 @@ python3 -m pip install ai-edge-litert numpy pillow
 树莓派 real 模式最小启动：
 
 SDL_VIDEODRIVER=kmsdrm python3 app/main.py --runtime real --input gpio --ui-backend screen --log-level INFO
+
+树莓派 real 模式推荐启动：
+
+cp env.real.local.example .env.real.local
+./scripts/run_real_pi.sh
 
 说明：
 - 若使用 venv，请确保安装依赖和运行应用使用同一解释器

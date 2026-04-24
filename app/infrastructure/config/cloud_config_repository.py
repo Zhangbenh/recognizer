@@ -31,7 +31,15 @@ class CloudConfig:
 
 	def require_credentials(self) -> tuple[str, str]:
 		if not self.api_key or not self.secret_key:
-			raise CloudConfigError("baidu api credentials are not configured", retryable=False)
+			raise CloudConfigError(
+				(
+					"baidu api credentials are not configured; set "
+					"RECOGNIZER_BAIDU_API_KEY / RECOGNIZER_BAIDU_SECRET_KEY, "
+					"or export the variables named by cloud_config.json api_key_env / secret_key_env, "
+					"or fill api_key / secret_key in config/cloud_config.json"
+				),
+				retryable=False,
+			)
 		return self.api_key, self.secret_key
 
 
@@ -58,11 +66,15 @@ class CloudConfigRepository:
 			direct_env_key="RECOGNIZER_BAIDU_API_KEY",
 			selector_env_key="RECOGNIZER_BAIDU_API_KEY_ENV",
 			configured_env_name=payload.get("api_key_env"),
+			configured_direct_value=payload.get("api_key"),
+			configured_direct_label="cloud_config.json:api_key",
 		)
 		secret_key, secret_key_env_name = self._resolve_sensitive_value(
 			direct_env_key="RECOGNIZER_BAIDU_SECRET_KEY",
 			selector_env_key="RECOGNIZER_BAIDU_SECRET_KEY_ENV",
 			configured_env_name=payload.get("secret_key_env"),
+			configured_direct_value=payload.get("secret_key"),
+			configured_direct_label="cloud_config.json:secret_key",
 		)
 
 		baidu_api_endpoint = self._resolve_string(
@@ -128,6 +140,8 @@ class CloudConfigRepository:
 		direct_env_key: str,
 		selector_env_key: str,
 		configured_env_name: Any,
+		configured_direct_value: Any,
+		configured_direct_label: str,
 	) -> tuple[str | None, str | None]:
 		direct_value = self._env_value(direct_env_key)
 		if direct_value is not None:
@@ -148,6 +162,10 @@ class CloudConfigRepository:
 			configured_value = self._env_value(configured_name)
 			if configured_value is not None:
 				return configured_value, configured_name
+
+		configured_literal = str(configured_direct_value).strip() if configured_direct_value is not None else None
+		if configured_literal:
+			return configured_literal, configured_direct_label
 
 		return None, configured_name
 
