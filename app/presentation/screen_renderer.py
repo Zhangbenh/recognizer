@@ -690,11 +690,35 @@ class PygameScreenRenderer:
 			return
 
 		panel_w = min(self._width - self._scaled_px(24), int(self._width * 0.92))
-		panel_h = max(
-			self._scaled_px(180),
-			header_font.get_height() + name_font.get_height() + meta_font.get_height() * 2 + self._scaled_px(42),
-		)
+		padding_x = self._scaled_px(12)
+		padding_top = self._scaled_px(12)
+		padding_bottom = self._scaled_px(12)
+		line_gap = self._scaled_px(10)
+		meta_gap = self._scaled_px(4)
+		hint_gap = self._scaled_px(10)
+		content_w = max(self._scaled_px(80), panel_w - padding_x * 2)
 		panel_x = (self._width - panel_w) // 2
+
+		name = view_model.get("display_name") or "未识别"
+		confidence = view_model.get("confidence")
+		if isinstance(confidence, float):
+			confidence_text = f"{confidence * 100:.1f}%"
+		else:
+			confidence_text = "--"
+		source_text = str(view_model.get("source_display_name") or "未知")
+
+		header = "记录中" if recording else "识别结果"
+		hint = "正在写入统计..." if recording else (view_model.get("hint") or "")
+		hint_lines = self._wrap_text(font=meta_font, text=str(hint), max_width=content_w, max_lines=2) if hint else []
+
+		panel_h = padding_top + header_font.get_height() + line_gap
+		panel_h += name_font.get_height() + line_gap
+		panel_h += meta_font.get_height() + meta_gap
+		panel_h += meta_font.get_height()
+		if hint_lines:
+			panel_h += hint_gap + len(hint_lines) * meta_font.get_height() + max(0, len(hint_lines) - 1) * self._scaled_px(2)
+		panel_h += padding_bottom
+		panel_h = max(self._scaled_px(196), panel_h)
 		panel_y = (self._height - panel_h) // 2
 
 		panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
@@ -710,20 +734,10 @@ class PygameScreenRenderer:
 			border_radius=self._scaled_px(10),
 		)
 
-		name = view_model.get("display_name") or "未识别"
-		confidence = view_model.get("confidence")
-		if isinstance(confidence, float):
-			confidence_text = f"{confidence * 100:.1f}%"
-		else:
-			confidence_text = "--"
-		source_text = str(view_model.get("source_display_name") or "未知")
-
-		header = "记录中" if recording else "识别结果"
-		line_top = panel_y + self._scaled_px(12)
-		line_gap = self._scaled_px(10)
+		line_top = panel_y + padding_top
 		line2 = line_top + header_font.get_height() + line_gap
 		line3 = line2 + name_font.get_height() + line_gap
-		line4 = line3 + meta_font.get_height() + self._scaled_px(4)
+		line4 = line3 + meta_font.get_height() + meta_gap
 		screen.blit(header_font.render(header, True, (200, 220, 255)), (panel_x + self._scaled_px(12), line_top))
 		screen.blit(name_font.render(str(name), True, (255, 255, 255)), (panel_x + self._scaled_px(12), line2))
 		screen.blit(
@@ -735,13 +749,14 @@ class PygameScreenRenderer:
 			(panel_x + self._scaled_px(12), line4),
 		)
 
-		hint = "正在写入统计..." if recording else (view_model.get("hint") or "")
-		if hint:
-			hint_label = meta_font.render(str(hint), True, (236, 236, 236))
-			screen.blit(
-				hint_label,
-				(panel_x + self._scaled_px(12), panel_y + panel_h - hint_label.get_height() - self._scaled_px(8)),
-			)
+		if hint_lines:
+			hint_y = line4 + meta_font.get_height() + hint_gap
+			for index, hint_line in enumerate(hint_lines):
+				hint_label = meta_font.render(str(hint_line), True, (236, 236, 236))
+				screen.blit(
+					hint_label,
+					(panel_x + padding_x, hint_y + index * (meta_font.get_height() + self._scaled_px(2))),
+				)
 
 	def _draw_stats_panel(self, *, view_model: dict[str, Any]) -> None:
 		pygame = self._pygame
