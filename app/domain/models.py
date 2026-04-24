@@ -102,6 +102,7 @@ class MapStatsItem:
 	covered_region_count: int
 	last_confidence: float
 	catalog_mapped: bool
+	covered_region_names: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

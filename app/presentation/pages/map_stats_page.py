@@ -35,6 +35,7 @@ class MapStatsPage:
 				name = item.get("display_name")
 				total_count = item.get("total_count")
 				covered_region_count = item.get("covered_region_count")
+				covered_regions_text = str(item.get("covered_regions_text") or "")
 				catalog_mapped = "是" if item.get("catalog_mapped") else "否"
 				confidence = item.get("last_confidence")
 				if isinstance(confidence, float):
@@ -42,7 +43,7 @@ class MapStatsPage:
 				else:
 					confidence_text = str(confidence)
 				lines.append(
-					f"    {index}. {name} | 总次数={total_count} | 覆盖区域={covered_region_count} | 最近置信度={confidence_text} | 已映射={catalog_mapped}"
+					f"    {index}. {name} | 总次数={total_count} | 覆盖区域={covered_region_count} | 所属区域={covered_regions_text or '-'} | 最近置信度={confidence_text} | 已映射={catalog_mapped}"
 				)
 
 		lines.append(f"  操作: {view_model.get('hint')}")

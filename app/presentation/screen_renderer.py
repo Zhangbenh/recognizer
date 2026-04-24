@@ -909,7 +909,7 @@ class PygameScreenRenderer:
 
 		items = view_model.get("items") or []
 		items_start_y = warning_y + meta_font.get_height() + self._scaled_px(8) if error_message else warning_y
-		row_h = item_font.get_height() + self._scaled_px(10)
+		row_h = item_font.get_height() + meta_font.get_height() * 2 + self._scaled_px(16)
 		max_items = max(1, (self._height - items_start_y - self._scaled_px(30)) // row_h)
 		if not items:
 			self._blit_text("暂无地图统计", font=item_font, x=text_x, y=items_start_y, color=(180, 180, 180))
@@ -918,8 +918,25 @@ class PygameScreenRenderer:
 				name = item.get("display_name") or "<未知>"
 				total_count = item.get("total_count")
 				covered = item.get("covered_region_count")
-				line = f"{index}. {name}  x{total_count}  区域{covered}"
-				self._blit_text(line, font=item_font, x=text_x, y=items_start_y + (index - 1) * row_h)
+				covered_regions_text = str(item.get("covered_regions_text") or "")
+				line_y = items_start_y + (index - 1) * row_h
+				self._blit_text(
+					f"{index}. {name}  x{total_count}",
+					font=item_font,
+					x=text_x,
+					y=line_y,
+					max_width=self._width - text_x - self._scaled_px(12),
+					max_lines=1,
+				)
+				self._blit_text(
+					f"覆盖区域: {covered}    所属区域: {covered_regions_text or '-'}",
+					font=meta_font,
+					x=text_x,
+					y=line_y + item_font.get_height() + self._scaled_px(4),
+					color=(214, 224, 240),
+					max_width=self._width - text_x - self._scaled_px(12),
+					max_lines=2,
+				)
 
 	def _draw_error_panel(self, *, view_model: dict[str, Any]) -> None:
 		pygame = self._pygame
