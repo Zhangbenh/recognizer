@@ -122,7 +122,7 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 				"available_map_names": _available_display_names(ctx.available_maps),
 				"selected_map_thumbnail_path": _selected_value(ctx.available_maps, ctx.selected_map_id, "map_id", "thumbnail_path"),
 				"map_items": _selection_items(ctx.available_maps, "map_id"),
-				"hint": "NAV：切换地图 | CONFIRM：进入区域 | NAV_LONG：地图统计 | BACK_LONG：返回首页",
+				"hint": "NAV切换  确认进入  长按统计  长按返回",
 			}
 		)
 	elif state == State.MAP_STATS:
@@ -192,7 +192,7 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 				"available_region_names": _available_display_names(ctx.available_regions),
 				"selected_region_thumbnail_path": _selected_value(ctx.available_regions, ctx.selected_region_id, "region_id", "thumbnail_path"),
 				"region_items": _selection_items(ctx.available_regions, "region_id"),
-				"hint": "NAV：切换区域 | CONFIRM：进入预览 | NAV_LONG：区域统计 | BACK_LONG：返回地图",
+				"hint": "NAV切换  确认预览  长按统计  长按返回",
 			}
 		)
 	elif state == State.PREVIEW:
