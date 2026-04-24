@@ -309,7 +309,7 @@ def _default_camera_options() -> dict[str, Any]:
 	return {
 		"width": _env_int("RECOGNIZER_CAMERA_WIDTH", 800 if portrait_layout else 480),
 		"height": _env_int("RECOGNIZER_CAMERA_HEIGHT", 480 if portrait_layout else 320),
-		"rotation": _env_int("RECOGNIZER_CAMERA_ROTATION", 180),
+		"rotation": _env_int("RECOGNIZER_CAMERA_ROTATION", 0),
 		"swap_red_blue": _env_bool("RECOGNIZER_CAMERA_SWAP_RED_BLUE", True),
 		"warmup_seconds": _env_float("RECOGNIZER_CAMERA_WARMUP_S", 0.5),
 	}
