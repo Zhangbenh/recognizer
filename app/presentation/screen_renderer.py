@@ -189,7 +189,7 @@ class PygameScreenRenderer:
 				selected_id=view_model.get("selected_map_id"),
 				hint=str(view_model.get("hint") or ""),
 				hero_title=view_model.get("selected_map_display_name") or "未选择地图",
-				hero_subtitle=str(view_model.get("selected_map_id") or ""),
+				hero_subtitle="",
 			)
 		elif state == State.REGION_SELECT:
 			self._draw_selection_gallery(
@@ -394,7 +394,6 @@ class PygameScreenRenderer:
 			return
 
 		portrait = self._is_portrait_layout()
-		title_font = self._font_small if portrait else self._font_medium
 		self._draw_centered_text(title, y=self._scaled_px(10), size="small" if portrait else "medium")
 
 		if not items:
@@ -409,18 +408,20 @@ class PygameScreenRenderer:
 				break
 
 		selected_item = items[selected_index]
-		margin = self._scaled_px(12)
+		margin = self._scaled_px(10)
 		gap = self._scaled_px(8)
 		hint_h = self._hint_block_height(hint, max_lines=2)
 		thumb_label_h = self._thumbnail_label_height()
-		max_visible_items = min(len(items), 4 if portrait else 5)
+		columns = 4 if portrait else 5
+		rows = 2 if portrait else 1
+		page_size = columns * rows
 		thumb_width = max(
 			self._scaled_px(70),
-			(self._width - margin * 2 - gap * max(0, max_visible_items - 1)) // max(1, max_visible_items),
+			(self._width - margin * 2 - gap * max(0, columns - 1)) // max(1, columns),
 		)
 		thumb_media_h = max(
-			self._scaled_px(56),
-			min(self._scaled_px(108 if portrait else 84), int(self._height * (0.15 if portrait else 0.12))),
+			self._scaled_px(54),
+			min(self._scaled_px(96 if portrait else 84), int(self._height * (0.12 if portrait else 0.12))),
 		)
 		thumb_h = thumb_media_h + thumb_label_h
 		caption_title_font = self._font_small if portrait else self._font_medium
@@ -428,12 +429,13 @@ class PygameScreenRenderer:
 		caption_height = caption_pad * 2 + (caption_title_font.get_height() if caption_title_font else 0)
 		if hero_subtitle:
 			caption_height += caption_font.get_height() + self._scaled_px(2)
-		hero_available_h = self._height - self._scaled_px(44) - thumb_h - hint_h - self._scaled_px(28)
-		hero_target_h = int(self._height * (0.44 if portrait else 0.50))
-		hero_height = max(self._scaled_px(88), min(hero_target_h, hero_available_h))
+		grid_total_h = rows * thumb_h + max(0, rows - 1) * gap
+		hero_top = self._scaled_px(44)
+		grid_top = self._height - hint_h - grid_total_h - self._scaled_px(14)
+		hero_height = max(self._scaled_px(150), grid_top - hero_top - self._scaled_px(10))
 		hero_rect = pygame.Rect(
 			margin,
-			self._scaled_px(44),
+			hero_top,
 			self._width - margin * 2,
 			hero_height,
 		)
@@ -475,26 +477,32 @@ class PygameScreenRenderer:
 				max_lines=1,
 			)
 
-		thumb_y = hero_rect.bottom + self._scaled_px(12)
-		window_start = max(0, min(selected_index - (max_visible_items // 2), len(items) - max_visible_items))
-		visible_items = items[window_start : window_start + max_visible_items]
+		thumb_y = hero_rect.bottom + self._scaled_px(10)
+		window_start = (selected_index // page_size) * page_size
+		visible_items = items[window_start : window_start + page_size]
 
-		for visible_index, item in enumerate(visible_items):
-			actual_index = window_start + visible_index
+		for slot_index in range(page_size):
+			row_index = slot_index // columns
+			column_index = slot_index % columns
 			thumb_rect = pygame.Rect(
-				margin + visible_index * (thumb_width + gap),
-				thumb_y,
+				margin + column_index * (thumb_width + gap),
+				thumb_y + row_index * (thumb_h + gap),
 				thumb_width,
 				thumb_h,
 			)
-			self._draw_media_card(
-				rect=thumb_rect,
-				thumbnail_path=item.get("thumbnail_path"),
-				label=str(item.get("display_name") or item.get("id") or ""),
-				highlighted=actual_index == selected_index,
-				cover=False,
-				show_label=True,
-			)
+			if slot_index < len(visible_items):
+				item = visible_items[slot_index]
+				actual_index = window_start + slot_index
+				self._draw_media_card(
+					rect=thumb_rect,
+					thumbnail_path=item.get("thumbnail_path"),
+					label=str(item.get("display_name") or item.get("id") or ""),
+					highlighted=actual_index == selected_index,
+					cover=False,
+					show_label=True,
+				)
+			else:
+				self._draw_empty_media_slot(rect=thumb_rect)
 
 		page_badge = f"{selected_index + 1}/{len(items)}"
 		badge = caption_font.render(page_badge, True, (255, 255, 255))
@@ -508,6 +516,17 @@ class PygameScreenRenderer:
 		screen.blit(badge, (badge_rect.x + self._scaled_px(6), badge_rect.y + self._scaled_px(4)))
 
 		self._draw_hint(hint)
+
+	def _draw_empty_media_slot(self, *, rect) -> None:
+		pygame = self._pygame
+		screen = self._screen
+		if pygame is None or screen is None:
+			return
+
+		placeholder = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+		placeholder.fill((18, 22, 30, 180))
+		screen.blit(placeholder, rect.topleft)
+		pygame.draw.rect(screen, (58, 70, 92), rect, 1, border_radius=self._scaled_px(8))
 
 	def _draw_media_card(
 		self,
