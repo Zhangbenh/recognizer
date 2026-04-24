@@ -22,6 +22,12 @@ class PreviewPage:
 				)
 			)
 
+		last_result_name = view_model.get("last_recognition_display_name")
+		last_result_source = view_model.get("last_recognition_source_display_name")
+		if last_result_source:
+			lines.append(f"  上次结果: {last_result_name or '未识别'}")
+			lines.append(f"  识别来源: {last_result_source}")
+
 		error_type = view_model.get("non_fatal_error_type")
 		error_message = view_model.get("non_fatal_error_message")
 		if error_message:

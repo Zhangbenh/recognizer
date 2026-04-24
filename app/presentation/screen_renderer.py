@@ -26,13 +26,14 @@ class PygameScreenRenderer:
 		self._image_cache: dict[tuple[str, str, int, int, bool], Any] = {}
 		self._font_path: str | None = None
 		self._font_label = "default"
+		self._ui_scale_override = os.getenv("RECOGNIZER_UI_SCALE", "").strip()
 
 		self._width = max(0, int(os.getenv("RECOGNIZER_SCREEN_WIDTH", "0")))
 		self._height = max(0, int(os.getenv("RECOGNIZER_SCREEN_HEIGHT", "0")))
 		self._fullscreen = os.getenv("RECOGNIZER_SCREEN_FULLSCREEN", "1") not in {"0", "false", "False"}
 		self._fill_screen = os.getenv("RECOGNIZER_SCREEN_FILL", "1") not in {"0", "false", "False"}
 		self._preview_rotation = int(os.getenv("RECOGNIZER_PREVIEW_ROTATION", "0"))
-		self._ui_scale = min(2.0, max(1.0, float(os.getenv("RECOGNIZER_UI_SCALE", "1.25"))))
+		self._ui_scale = 1.0
 		self._crosshair_color = (40, 240, 120)
 		self._bg_color = (12, 16, 22)
 		self._panel_bg = (0, 0, 0, 160)
@@ -60,6 +61,7 @@ class PygameScreenRenderer:
 			self._width = int(display_info.current_w or 480)
 		if self._height <= 0:
 			self._height = int(display_info.current_h or 320)
+		self._ui_scale = self._resolve_ui_scale()
 
 		flags = pygame.NOFRAME
 		if self._fullscreen:
@@ -202,6 +204,7 @@ class PygameScreenRenderer:
 			self._draw_map_stats_panel(view_model=view_model)
 		elif state == State.PREVIEW:
 			self._draw_crosshair()
+			self._draw_preview_result_source(view_model=view_model)
 			self._draw_hint(view_model.get("hint"))
 			non_fatal = view_model.get("non_fatal_error_message")
 			if non_fatal:
@@ -361,7 +364,9 @@ class PygameScreenRenderer:
 		if pygame is None or screen is None or caption_font is None:
 			return
 
-		self._draw_centered_text(title, y=self._scaled_px(10), size="medium")
+		portrait = self._is_portrait_layout()
+		title_font = self._font_small if portrait else self._font_medium
+		self._draw_centered_text(title, y=self._scaled_px(10), size="small" if portrait else "medium")
 
 		if not items:
 			self._draw_centered_text("暂无可用图片", y=self._height // 2)
@@ -376,11 +381,32 @@ class PygameScreenRenderer:
 
 		selected_item = items[selected_index]
 		margin = self._scaled_px(12)
+		gap = self._scaled_px(8)
+		hint_h = self._hint_block_height(hint, max_lines=2)
+		thumb_label_h = self._thumbnail_label_height()
+		max_visible_items = min(len(items), 4 if portrait else 5)
+		thumb_width = max(
+			self._scaled_px(70),
+			(self._width - margin * 2 - gap * max(0, max_visible_items - 1)) // max(1, max_visible_items),
+		)
+		thumb_media_h = max(
+			self._scaled_px(56),
+			min(self._scaled_px(108 if portrait else 84), int(self._height * (0.15 if portrait else 0.12))),
+		)
+		thumb_h = thumb_media_h + thumb_label_h
+		caption_title_font = self._font_small if portrait else self._font_medium
+		caption_pad = self._scaled_px(8)
+		caption_height = caption_pad * 2 + (caption_title_font.get_height() if caption_title_font else 0)
+		if hero_subtitle:
+			caption_height += caption_font.get_height() + self._scaled_px(2)
+		hero_available_h = self._height - self._scaled_px(44) - thumb_h - hint_h - self._scaled_px(28)
+		hero_target_h = int(self._height * (0.44 if portrait else 0.50))
+		hero_height = max(self._scaled_px(88), min(hero_target_h, hero_available_h))
 		hero_rect = pygame.Rect(
 			margin,
 			self._scaled_px(44),
 			self._width - margin * 2,
-			int(self._height * 0.54),
+			hero_height,
 		)
 		self._draw_media_card(
 			rect=hero_rect,
@@ -393,29 +419,41 @@ class PygameScreenRenderer:
 
 		caption_rect = pygame.Rect(
 			hero_rect.x,
-			hero_rect.bottom - self._scaled_px(42),
+			hero_rect.bottom - caption_height,
 			hero_rect.width,
-			self._scaled_px(42),
+			caption_height,
 		)
 		caption = pygame.Surface((caption_rect.width, caption_rect.height), pygame.SRCALPHA)
 		caption.fill((0, 0, 0, 165))
 		screen.blit(caption, caption_rect.topleft)
-		self._blit_text(str(hero_title), font=self._font_medium, x=caption_rect.x + self._scaled_px(10), y=caption_rect.y + self._scaled_px(4))
+		self._blit_text(
+			str(hero_title),
+			font=caption_title_font,
+			x=caption_rect.x + self._scaled_px(10),
+			y=caption_rect.y + caption_pad - self._scaled_px(1),
+			max_width=caption_rect.width - self._scaled_px(20),
+			max_lines=1,
+		)
 		if hero_subtitle:
-			self._blit_text(str(hero_subtitle), font=caption_font, x=caption_rect.x + self._scaled_px(10), y=caption_rect.y + self._scaled_px(22), color=(214, 224, 240))
+			subtitle_y = caption_rect.y + caption_pad + caption_title_font.get_height()
+			self._blit_text(
+				str(hero_subtitle),
+				font=caption_font,
+				x=caption_rect.x + self._scaled_px(10),
+				y=subtitle_y,
+				color=(214, 224, 240),
+				max_width=caption_rect.width - self._scaled_px(20),
+				max_lines=1,
+			)
 
 		thumb_y = hero_rect.bottom + self._scaled_px(12)
-		hint_reserve = self._scaled_px(42)
-		thumb_h = max(self._scaled_px(54), self._height - thumb_y - hint_reserve)
-		gap = self._scaled_px(8)
-		thumb_width = max(
-			self._scaled_px(72),
-			(self._width - margin * 2 - gap * max(0, len(items) - 1)) // max(1, len(items)),
-		)
+		window_start = max(0, min(selected_index - (max_visible_items // 2), len(items) - max_visible_items))
+		visible_items = items[window_start : window_start + max_visible_items]
 
-		for index, item in enumerate(items):
+		for visible_index, item in enumerate(visible_items):
+			actual_index = window_start + visible_index
 			thumb_rect = pygame.Rect(
-				margin + index * (thumb_width + gap),
+				margin + visible_index * (thumb_width + gap),
 				thumb_y,
 				thumb_width,
 				thumb_h,
@@ -424,7 +462,7 @@ class PygameScreenRenderer:
 				rect=thumb_rect,
 				thumbnail_path=item.get("thumbnail_path"),
 				label=str(item.get("display_name") or item.get("id") or ""),
-				highlighted=index == selected_index,
+				highlighted=actual_index == selected_index,
 				cover=False,
 				show_label=True,
 			)
@@ -471,11 +509,23 @@ class PygameScreenRenderer:
 		pygame.draw.rect(screen, border_color, rect, 3 if highlighted else 1, border_radius=self._scaled_px(8))
 
 		if show_label:
-			label_h = self._scaled_px(26)
+			label_font = self._font_small
+			label_pad_y = self._scaled_px(4)
+			label_h = max(
+				self._scaled_px(26),
+				(label_font.get_height() if label_font is not None else self._scaled_px(16)) + label_pad_y * 2,
+			)
 			overlay = pygame.Surface((rect.width, label_h), pygame.SRCALPHA)
 			overlay.fill((0, 0, 0, 165))
 			screen.blit(overlay, (rect.x, rect.bottom - label_h))
-			self._blit_text(label, font=self._font_small, x=rect.x + self._scaled_px(6), y=rect.bottom - label_h + self._scaled_px(4), max_width=rect.width - self._scaled_px(12))
+			self._blit_text(
+				label,
+				font=label_font,
+				x=rect.x + self._scaled_px(6),
+				y=rect.bottom - label_h + label_pad_y,
+				max_width=rect.width - self._scaled_px(12),
+				max_lines=1,
+			)
 
 	def _get_media_surface(self, thumbnail_path: Any, *, label: str, width: int, height: int, cover: bool):
 		pygame = self._pygame
@@ -539,7 +589,12 @@ class PygameScreenRenderer:
 		if font is None:
 			return surface
 
-		lines = self._wrap_text(str(label or "未配置图片"), font=font, max_width=max(20, width - self._scaled_px(20)), max_lines=3)
+		lines = self._wrap_text(
+			font=font,
+			text=str(label or "未配置图片"),
+			max_width=max(20, width - self._scaled_px(20)),
+			max_lines=3,
+		)
 		line_h = font.get_height() + self._scaled_px(2)
 		text_top = (height - line_h * len(lines)) // 2
 		for index, line in enumerate(lines):
@@ -651,7 +706,7 @@ class PygameScreenRenderer:
 		pygame = self._pygame
 		screen = self._screen
 		meta_font = self._font_medium
-		item_font = self._font_medium
+		item_font = self._font_small if self._is_portrait_layout() else self._font_medium
 		if pygame is None or screen is None or meta_font is None or item_font is None:
 			return
 
@@ -700,34 +755,53 @@ class PygameScreenRenderer:
 		pygame = self._pygame
 		screen = self._screen
 		meta_font = self._font_small
-		item_font = self._font_medium
+		item_font = self._font_small if self._is_portrait_layout() else self._font_medium
 		if pygame is None or screen is None or meta_font is None or item_font is None:
 			return
 
+		portrait = self._is_portrait_layout()
 		screen.fill((18, 22, 26))
-		self._draw_centered_text("地图统计", y=self._scaled_px(12), size="medium")
+		self._draw_centered_text("地图统计", y=self._scaled_px(12), size="small" if portrait else "medium")
+
+		thumb_width = self._scaled_px(92 if portrait else 112)
+		thumb_height = self._scaled_px(68 if portrait else 72)
 
 		thumb_surface = self._get_media_surface(
 			view_model.get("map_thumbnail_path"),
 			label=str(view_model.get("map_display_name") or view_model.get("map_id") or "地图"),
-			width=self._scaled_px(112),
-			height=self._scaled_px(72),
+			width=thumb_width,
+			height=thumb_height,
 			cover=False,
 		)
+		thumb_x = self._width - thumb_width - self._scaled_px(12)
+		thumb_y = self._scaled_px(42)
 		if thumb_surface is not None:
-			screen.blit(thumb_surface, (self._width - thumb_surface.get_width() - self._scaled_px(12), self._scaled_px(42)))
+			screen.blit(thumb_surface, (thumb_x, thumb_y))
 
 		map_name = view_model.get("map_display_name") or view_model.get("map_id") or "<未选择>"
 		text_x = self._scaled_px(12)
 		text_y = self._scaled_px(46)
-		self._blit_text(f"地图: {map_name}", font=item_font, x=text_x, y=text_y)
-		self._blit_text(f"区域总数: {view_model.get('total_region_count', 0)}", font=meta_font, x=text_x, y=text_y + item_font.get_height() + self._scaled_px(6), color=(220, 220, 220))
-		self._blit_text(f"已记录区域: {view_model.get('recorded_region_count', 0)}", font=meta_font, x=text_x, y=text_y + item_font.get_height() + meta_font.get_height() + self._scaled_px(10), color=(220, 220, 220))
-		self._blit_text(f"植物种类: {view_model.get('plant_species_count', 0)}", font=meta_font, x=text_x, y=text_y + item_font.get_height() + meta_font.get_height() * 2 + self._scaled_px(14), color=(220, 220, 220))
+		text_max_width = max(self._scaled_px(120), thumb_x - text_x - self._scaled_px(12))
+		self._blit_text(
+			f"地图: {map_name}",
+			font=item_font,
+			x=text_x,
+			y=text_y,
+			max_width=text_max_width,
+			max_lines=1,
+		)
+		summary_y = text_y + item_font.get_height() + self._scaled_px(6)
+		for summary_line in (
+			f"区域总数: {view_model.get('total_region_count', 0)}",
+			f"已记录区域: {view_model.get('recorded_region_count', 0)}",
+			f"植物种类: {view_model.get('plant_species_count', 0)}",
+		):
+			self._blit_text(summary_line, font=meta_font, x=text_x, y=summary_y, color=(220, 220, 220), max_width=text_max_width, max_lines=1)
+			summary_y += meta_font.get_height() + self._scaled_px(4)
 
 		page = int(view_model.get("page", 0)) + 1
 		total_pages = max(1, int(view_model.get("total_pages", 1)))
-		page_y = self._scaled_px(134)
+		page_y = max(summary_y + self._scaled_px(6), thumb_y + thumb_height + self._scaled_px(8))
 		self._blit_text(f"页码: {page}/{total_pages}", font=meta_font, x=text_x, y=page_y, color=(220, 220, 220))
 
 		error_message = view_model.get("map_stats_error_message")
@@ -834,8 +908,23 @@ class PygameScreenRenderer:
 		if pygame is None or screen is None or font is None:
 			return
 
-		label = font.render(str(hint), True, (236, 236, 236))
-		screen.blit(label, (self._scaled_px(8), self._height - label.get_height() - self._scaled_px(6)))
+		lines = self._hint_lines(hint, max_lines=2)
+		if not lines:
+			return
+
+		pad_x = self._scaled_px(10)
+		pad_y = self._scaled_px(6)
+		spacing = self._scaled_px(2)
+		line_h = font.get_height()
+		panel_h = pad_y * 2 + len(lines) * line_h + max(0, len(lines) - 1) * spacing
+		panel = pygame.Surface((self._width - self._scaled_px(12), panel_h), pygame.SRCALPHA)
+		panel.fill((0, 0, 0, 140))
+		panel_y = self._height - panel_h - self._scaled_px(6)
+		screen.blit(panel, (self._scaled_px(6), panel_y))
+
+		for index, line in enumerate(lines):
+			label = font.render(str(line), True, (236, 236, 236))
+			screen.blit(label, (self._scaled_px(6) + pad_x, panel_y + pad_y + index * (line_h + spacing)))
 
 	def _draw_centered_text(self, text: str, *, y: int, size: str = "medium") -> None:
 		pygame = self._pygame
@@ -865,6 +954,7 @@ class PygameScreenRenderer:
 		y: int,
 		color: tuple[int, int, int] = (245, 245, 245),
 		max_width: int | None = None,
+		max_lines: int = 2,
 	) -> None:
 		pygame = self._pygame
 		screen = self._screen
@@ -873,11 +963,86 @@ class PygameScreenRenderer:
 
 		lines = [text]
 		if max_width is not None:
-			lines = self._wrap_text(font=font, text=text, max_width=max_width, max_lines=2)
+			lines = self._wrap_text(font=font, text=text, max_width=max_width, max_lines=max_lines)
 
 		for index, line in enumerate(lines):
 			label = font.render(line, True, color)
 			screen.blit(label, (x, y + index * (font.get_height() + self._scaled_px(2))))
+
+	def _resolve_ui_scale(self) -> float:
+		if self._ui_scale_override:
+			try:
+				return min(2.0, max(0.85, float(self._ui_scale_override)))
+			except ValueError:
+				pass
+		return 1.0 if self._is_portrait_layout() else 1.25
+
+	def _is_portrait_layout(self) -> bool:
+		return self._height > self._width
+
+	def _hint_lines(self, hint: Any, *, max_lines: int) -> list[str]:
+		if not hint:
+			return []
+
+		font = self._font_small
+		if font is None:
+			return [str(hint)]
+
+		max_width = max(self._scaled_px(120), self._width - self._scaled_px(32))
+		return self._wrap_text(font=font, text=str(hint), max_width=max_width, max_lines=max_lines)
+
+	def _hint_block_height(self, hint: Any, *, max_lines: int) -> int:
+		font = self._font_small
+		if font is None:
+			return self._scaled_px(36)
+
+		lines = self._hint_lines(hint, max_lines=max_lines) or [""]
+		spacing = self._scaled_px(2)
+		return self._scaled_px(12) + len(lines) * font.get_height() + max(0, len(lines) - 1) * spacing
+
+	def _thumbnail_label_height(self) -> int:
+		font = self._font_small
+		if font is None:
+			return self._scaled_px(28)
+		return max(self._scaled_px(28), font.get_height() + self._scaled_px(8))
+
+	def _draw_preview_result_source(self, *, view_model: dict[str, Any]) -> None:
+		pygame = self._pygame
+		screen = self._screen
+		font = self._font_small
+		if pygame is None or screen is None or font is None:
+			return
+
+		source_name = str(view_model.get("last_recognition_source_display_name") or "").strip()
+		if not source_name:
+			return
+
+		result_name = str(view_model.get("last_recognition_display_name") or "未识别").strip() or "未识别"
+		lines = [f"上次结果: {result_name}", f"来源: {source_name}"]
+		line_h = font.get_height()
+		spacing = self._scaled_px(2)
+		pad_x = self._scaled_px(10)
+		pad_y = self._scaled_px(6)
+		panel_w = max(font.size(line)[0] for line in lines) + pad_x * 2
+		panel_h = pad_y * 2 + len(lines) * line_h + spacing
+		panel_x = self._width - panel_w - self._scaled_px(12)
+		panel_y = self._scaled_px(12)
+
+		panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+		panel.fill((0, 0, 0, 165))
+		screen.blit(panel, (panel_x, panel_y))
+
+		if source_name == "云端":
+			border_color = (88, 170, 255)
+		elif source_name == "本地回退":
+			border_color = (255, 190, 80)
+		else:
+			border_color = (88, 214, 148)
+		pygame.draw.rect(screen, border_color, pygame.Rect(panel_x, panel_y, panel_w, panel_h), 2, border_radius=self._scaled_px(8))
+
+		for index, line in enumerate(lines):
+			label = font.render(line, True, (245, 245, 245))
+			screen.blit(label, (panel_x + pad_x, panel_y + pad_y + index * (line_h + spacing)))
 
 	def _drain_events(self) -> None:
 		pygame = self._pygame

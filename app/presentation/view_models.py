@@ -46,6 +46,21 @@ def _selected_value(items: list[dict[str, Any]], selected_id: str | None, id_key
 	return None
 
 
+def _recognition_source_display_name(result: Any | None) -> str | None:
+	if result is None:
+		return None
+
+	source = str(getattr(result, "source", "") or "").strip().lower()
+	fallback_used = bool(getattr(result, "fallback_used", False))
+	if source == "cloud":
+		return "云端"
+	if source == "local" and fallback_used:
+		return "本地回退"
+	if source == "local":
+		return "本地"
+	return source or None
+
+
 def _selection_items(items: list[dict[str, Any]], id_key: str) -> list[dict[str, Any]]:
 	result: list[dict[str, Any]] = []
 	for item in items:
@@ -181,6 +196,7 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 			}
 		)
 	elif state == State.PREVIEW:
+		result = ctx.last_recognition_result
 		if ctx.mode == "sampling":
 			selected_map_name = _selected_display_name(ctx.available_maps, ctx.selected_map_id, "map_id")
 			selected_region_name = _selected_display_name(ctx.available_regions, ctx.selected_region_id, "region_id")
@@ -195,6 +211,15 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 			)
 		else:
 			base.update({"hint": "CONFIRM：拍摄 | BACK_LONG：返回"})
+
+		if result is not None:
+			base.update(
+				{
+					"last_recognition_display_name": result.display_name or "未识别",
+					"last_recognition_source_display_name": _recognition_source_display_name(result),
+					"last_recognition_is_recognized": bool(result.is_recognized),
+				}
+			)
 
 		error = ctx.last_error
 		if error and _is_non_fatal_error(error.error_type) and ctx.preview_error_flash_pending:
@@ -213,6 +238,7 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 				"plant_name": result.plant_name if result else None,
 				"confidence": result.confidence if result else None,
 				"is_recognized": result.is_recognized if result else False,
+				"source_display_name": _recognition_source_display_name(result),
 			}
 		)
 	elif state == State.CAPTURED:

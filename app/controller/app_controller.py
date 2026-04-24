@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -274,18 +275,53 @@ class _MockBaiduPlantClient:
 		)
 
 
+def _env_int(name: str, default: int) -> int:
+	raw = os.getenv(name, "").strip()
+	if not raw:
+		return default
+	try:
+		return int(raw)
+	except ValueError:
+		return default
+
+
+def _env_float(name: str, default: float) -> float:
+	raw = os.getenv(name, "").strip()
+	if not raw:
+		return default
+	try:
+		return float(raw)
+	except ValueError:
+		return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+	raw = os.getenv(name, "").strip().lower()
+	if not raw:
+		return default
+	return raw not in {"0", "false", "no", "off"}
+
+
+def _default_camera_options() -> dict[str, Any]:
+	screen_width = _env_int("RECOGNIZER_SCREEN_WIDTH", 480)
+	screen_height = _env_int("RECOGNIZER_SCREEN_HEIGHT", 800)
+	portrait_layout = screen_height >= screen_width
+	return {
+		"width": _env_int("RECOGNIZER_CAMERA_WIDTH", 800 if portrait_layout else 480),
+		"height": _env_int("RECOGNIZER_CAMERA_HEIGHT", 480 if portrait_layout else 320),
+		"rotation": _env_int("RECOGNIZER_CAMERA_ROTATION", 90 if portrait_layout else 180),
+		"swap_red_blue": _env_bool("RECOGNIZER_CAMERA_SWAP_RED_BLUE", True),
+		"warmup_seconds": _env_float("RECOGNIZER_CAMERA_WARMUP_S", 0.5),
+	}
+
+
 def _build_runtime_adapters(
 	*, runtime_backend: str, expected_output_classes: int
 ) -> tuple[BaseCameraAdapter, BaseInferenceAdapter]:
 	if runtime_backend == "mock":
 		return _MockCameraAdapter(), _MockInferenceAdapter(expected_output_classes=expected_output_classes)
 
-	camera_adapter = Picamera2Adapter(
-		width=480,
-		height=320,
-		rotation=180,
-		swap_red_blue=True,
-	)
+	camera_adapter = Picamera2Adapter(**_default_camera_options())
 	inference_adapter = TFLiteAdapter(expected_output_classes=expected_output_classes)
 	return camera_adapter, inference_adapter
 

@@ -368,6 +368,30 @@ def test_preview_view_model_contains_non_fatal_error_hint() -> None:
 	assert view_model["non_fatal_error_message"] == "infer timeout"
 
 
+def test_preview_view_model_exposes_last_recognition_source() -> None:
+	ctx = StateContext(
+		mode="normal",
+		last_recognition_result=RecognitionResult(
+			class_id=1,
+			plant_key="banana",
+			plant_name="banana",
+			display_name="香蕉",
+			confidence=0.94,
+			is_recognized=True,
+			source="local",
+			fallback_used=True,
+		),
+	)
+
+	view_model = build_view_model(State.PREVIEW, ctx)
+	lines = PreviewPage.render(view_model)
+
+	assert view_model["last_recognition_display_name"] == "香蕉"
+	assert view_model["last_recognition_source_display_name"] == "本地回退"
+	assert any("上次结果: 香蕉" in line for line in lines)
+	assert any("识别来源: 本地回退" in line for line in lines)
+
+
 def test_stats_page_renders_warning_for_data_error() -> None:
 	view_model = {
 		"mode": "sampling",
