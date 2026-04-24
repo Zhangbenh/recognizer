@@ -179,10 +179,12 @@ def test_map_statistics_aggregate_records_for_whole_map(tmp_path) -> None:
 	assert [item.plant_key for item in snapshot.items] == ["banana", "cloud:wildflower"]
 	assert snapshot.items[0].total_count == 3
 	assert snapshot.items[0].covered_region_count == 2
+	assert snapshot.items[0].covered_region_names == ["区域1", "区域2"]
 	assert snapshot.items[0].last_confidence == 0.92
 	assert snapshot.items[0].catalog_mapped is True
 	assert snapshot.items[1].total_count == 1
 	assert snapshot.items[1].covered_region_count == 1
+	assert snapshot.items[1].covered_region_names == ["区域2"]
 	assert snapshot.items[1].catalog_mapped is False
 
 
@@ -301,6 +303,7 @@ def test_sampling_pages_render_with_view_models() -> None:
 				display_name="香蕉",
 				total_count=4,
 				covered_region_count=1,
+				covered_region_names=["区域1"],
 				last_confidence=0.93,
 				catalog_mapped=True,
 			)
@@ -313,7 +316,9 @@ def test_sampling_pages_render_with_view_models() -> None:
 	assert map_stats_lines[0] == "[地图统计]"
 	assert any("地图B" in line for line in map_stats_lines)
 	assert any("香蕉" in line for line in map_stats_lines)
+	assert any("所属区域=区域1" in line for line in map_stats_lines)
 	assert map_stats_vm["map_thumbnail_path"] is None
+	assert map_stats_vm["items"][0]["covered_regions_text"] == "区域1"
 
 
 def test_selection_view_models_include_thumbnail_entry_points() -> None:

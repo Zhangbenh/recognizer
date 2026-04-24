@@ -53,6 +53,7 @@ class StatisticsQueryService:
 		payload = self._safe_read()
 		map_item = self._safe_get_map(map_id)
 		region_ids = self._map_region_ids(payload, map_id, map_item)
+		region_name_by_id = self._map_region_display_names(map_item)
 		aggregates: dict[str, dict[str, Any]] = {}
 		recorded_region_count = 0
 
@@ -89,6 +90,11 @@ class StatisticsQueryService:
 				display_name=str(item["display_name"]),
 				total_count=int(item["total_count"]),
 				covered_region_count=len(item["covered_regions"]),
+				covered_region_names=self._ordered_region_names(
+					item["covered_regions"],
+					region_ids,
+					region_name_by_id,
+				),
 				last_confidence=float(item["last_confidence"]),
 				catalog_mapped=bool(item["catalog_mapped"]),
 			)
@@ -227,4 +233,41 @@ class StatisticsQueryService:
 
 		prefix = f"{map_id}_"
 		return [str(region_id) for region_id in regions.keys() if str(region_id).startswith(prefix)]
+
+	def _map_region_display_names(self, map_item: dict[str, Any] | None) -> dict[str, str]:
+		if not isinstance(map_item, dict):
+			return {}
+
+		regions = map_item.get("regions", [])
+		if not isinstance(regions, list):
+			return {}
+
+		region_name_by_id: dict[str, str] = {}
+		for region in regions:
+			if not isinstance(region, dict):
+				continue
+			region_id = str(region.get("region_id") or "").strip()
+			if not region_id:
+				continue
+			region_name_by_id[region_id] = str(region.get("display_name") or region_id).strip() or region_id
+		return region_name_by_id
+
+	def _ordered_region_names(
+		self,
+		covered_regions: set[str],
+		ordered_region_ids: list[str],
+		region_name_by_id: dict[str, str],
+	) -> list[str]:
+		if not covered_regions:
+			return []
+
+		ordered_names = [
+			region_name_by_id.get(region_id, region_id)
+			for region_id in ordered_region_ids
+			if region_id in covered_regions
+		]
+		if ordered_names:
+			return ordered_names
+
+		return [region_name_by_id.get(region_id, region_id) for region_id in sorted(covered_regions)]
 

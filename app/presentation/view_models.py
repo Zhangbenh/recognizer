@@ -159,6 +159,8 @@ def build_view_model(state: State, ctx: StateContext) -> dict[str, Any]:
 					"display_name": item.display_name,
 					"total_count": item.total_count,
 					"covered_region_count": item.covered_region_count,
+					"covered_region_names": list(item.covered_region_names),
+					"covered_regions_text": "、".join(item.covered_region_names),
 					"last_confidence": item.last_confidence,
 					"catalog_mapped": item.catalog_mapped,
 				}
