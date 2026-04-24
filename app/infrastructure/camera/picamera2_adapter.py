@@ -14,9 +14,9 @@ class Picamera2Adapter(BaseCameraAdapter):
 	def __init__(
 		self,
 		*,
-		width: int = 480,
-		height: int = 320,
-		rotation: int = 180,
+		width: int = 960,
+		height: int = 540,
+		rotation: int = 90,
 		swap_red_blue: bool = True,
 		warmup_seconds: float = 0.5,
 	) -> None:

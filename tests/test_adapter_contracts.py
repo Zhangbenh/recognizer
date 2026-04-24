@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from controller.app_controller import _default_camera_options
 from application.events import EventType
 from application.input_mapper import InputMapper
 from application.states import State
@@ -17,6 +18,7 @@ from infrastructure.config.label_repository import LabelRepository
 from infrastructure.config.model_manifest_repository import ModelManifestRepository
 from infrastructure.config.sampling_config_repository import SamplingConfigRepository
 from infrastructure.config.system_config_repository import SystemConfigRepository
+from infrastructure.camera.picamera2_adapter import Picamera2Adapter
 from infrastructure.input.keyboard_adapter import KeyboardAdapter
 from infrastructure.storage.json_storage_adapter import JsonStorageAdapter
 
@@ -76,6 +78,26 @@ def test_keyboard_adapter_queue_contract() -> None:
 	events = adapter.poll_raw_inputs()
 	assert [event["event_type"] for event in events] == ["BTN1_SHORT", "BTN2_LONG"]
 	assert adapter.poll_raw_inputs() == []
+
+
+def test_default_camera_options_use_16_9_capture_for_portrait_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+	monkeypatch.setenv("RECOGNIZER_SCREEN_WIDTH", "480")
+	monkeypatch.setenv("RECOGNIZER_SCREEN_HEIGHT", "800")
+	monkeypatch.delenv("RECOGNIZER_CAMERA_WIDTH", raising=False)
+	monkeypatch.delenv("RECOGNIZER_CAMERA_HEIGHT", raising=False)
+
+	options = _default_camera_options()
+
+	assert options["width"] == 960
+	assert options["height"] == 540
+
+
+def test_picamera2_adapter_defaults_match_portrait_camera_strategy() -> None:
+	adapter = Picamera2Adapter()
+
+	assert adapter._width == 960
+	assert adapter._height == 540
+	assert adapter._rotation == 90
 
 
 def test_input_mapper_error_confirm_maps_to_retry_press() -> None:
