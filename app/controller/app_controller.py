@@ -313,8 +313,8 @@ def _default_camera_options() -> dict[str, Any]:
 	screen_height = _env_int("RECOGNIZER_SCREEN_HEIGHT", 800)
 	portrait_layout = screen_height >= screen_width
 	return {
-		"width": _env_int("RECOGNIZER_CAMERA_WIDTH", 800 if portrait_layout else 480),
-		"height": _env_int("RECOGNIZER_CAMERA_HEIGHT", 480 if portrait_layout else 320),
+		"width": _env_int("RECOGNIZER_CAMERA_WIDTH", 960 if portrait_layout else 640),
+		"height": _env_int("RECOGNIZER_CAMERA_HEIGHT", 540 if portrait_layout else 360),
 		"rotation": _env_int("RECOGNIZER_CAMERA_ROTATION", 0),
 		"swap_red_blue": _env_bool("RECOGNIZER_CAMERA_SWAP_RED_BLUE", True),
 		"warmup_seconds": _env_float("RECOGNIZER_CAMERA_WARMUP_S", 0.5),
