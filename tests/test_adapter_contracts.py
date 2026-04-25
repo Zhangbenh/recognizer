@@ -142,6 +142,9 @@ def test_config_repositories_contracts_and_release_gate() -> None:
 	assert len(labels) == 30
 	assert labels[0]["display_name"] == "芦荟"
 
+	manifest_payload = manifest_repo.load()
+	assert manifest_payload["version"] == "1.1.0"
+	assert manifest_payload["label_version"] == "1.1.0"
 	assert manifest_repo.output_classes() == 30
 	assert manifest_repo.get_model_file().endswith(".tflite")
 
